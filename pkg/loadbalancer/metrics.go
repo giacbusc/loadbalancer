@@ -5,10 +5,11 @@ import (
 )
 
 type Metrics struct {
-	requestDuration *prometheus.HistogramVec
-	activeRequests  *prometheus.GaugeVec
-	serverHealth    *prometheus.GaugeVec
-	serverRIF       *prometheus.GaugeVec
+	requestDuration   *prometheus.HistogramVec
+	activeRequests    *prometheus.GaugeVec
+	serverHealth      *prometheus.GaugeVec
+	serverRIF         *prometheus.GaugeVec // client-local RIF (this LB's view)
+	serverRIFReported *prometheus.GaugeVec // server-local RIF (from probe header)
 }
 
 func NewMetrics() *Metrics {
@@ -38,7 +39,14 @@ func NewMetrics() *Metrics {
 		serverRIF: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "server_rif",
-				Help: "Requests in flight per server",
+				Help: "Client-local requests in flight per server",
+			},
+			[]string{"server_id", "algorithm"},
+		),
+		serverRIFReported: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "server_rif_reported",
+				Help: "Server-local RIF as reported by the backend probe",
 			},
 			[]string{"server_id", "algorithm"},
 		),
@@ -48,6 +56,7 @@ func NewMetrics() *Metrics {
 	prometheus.MustRegister(m.activeRequests)
 	prometheus.MustRegister(m.serverHealth)
 	prometheus.MustRegister(m.serverRIF)
+	prometheus.MustRegister(m.serverRIFReported)
 
 	return m
 }
