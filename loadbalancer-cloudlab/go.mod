@@ -1,6 +1,6 @@
 module github.com/omarshaarawi/loadbalancer
 
-go 1.24.2
+go 1.22
 
 require github.com/prometheus/client_golang v1.23.2
 
