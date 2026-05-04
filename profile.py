@@ -35,7 +35,6 @@ pc.defineParameter(
     "Git repository URL with the loadbalancer code",
     portal.ParameterType.STRING,
     "https://github.com/giacbusc/loadbalancer.git",
-    longDescription="Replace with your fork URL containing the modified code."
 )
 pc.defineParameter(
     "repo_branch",
