@@ -1,10 +1,8 @@
 #!/bin/bash
 # experiment-rif-source.sh — Compares HCL with client-local RIF vs server-local RIF.
 #
-# Run from a loadgen node. This experiment requires SSH-keying into the
-# lb-prequal node to switch the LB_USE_SERVER_RIF env var between runs.
-#
-# Usage: ./experiment-rif-source.sh
+# Run from a loadgen node. SSH-keying into lb-prequal must work (CloudLab
+# installs project SSH keys on all nodes by default).
 
 set -e
 
@@ -14,9 +12,8 @@ LB_PREQUAL="http://${LB_PREQUAL_HOST}:8080"
 RESULTS_DIR="/tmp/rif-source-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$RESULTS_DIR"
 
-# Helper: restart the LB container with a given LB_USE_SERVER_RIF value.
-# Requires passwordless SSH to the LB host. CloudLab installs SSH keys for
-# all members of your project, so this should work out of the box.
+BACKENDS="10.10.1.21:8080,10.10.1.22:8080,10.10.1.23:8080,10.10.1.24:8080,10.10.1.25:8080,10.10.1.26:8080,10.10.1.27:8080,10.10.1.28:8080,10.10.1.29:8080,10.10.1.30:8080"
+
 restart_lb() {
     local USE_SERVER_RIF="$1"
     echo ">> Restarting lb-prequal with LB_USE_SERVER_RIF=$USE_SERVER_RIF"
@@ -29,17 +26,15 @@ restart_lb() {
             -e LB_SELECTION_CHOICES=2 \
             -e LB_PROBE_INTERVAL=1s \
             -e LB_USE_SERVER_RIF=$USE_SERVER_RIF \
-            -e BACKENDS=10.10.1.21:8080,10.10.1.22:8080,10.10.1.23:8080,10.10.1.24:8080 \
+            -e BACKENDS=$BACKENDS \
             loadbalancer:latest"
     sleep 5
-    # Wait for /health to come back.
     until curl -fsS "$LB_PREQUAL/health" >/dev/null; do
         echo "    waiting for LB to be ready..."
         sleep 2
     done
 }
 
-# Run a load test, output to a file.
 run_load() {
     local LABEL="$1"
     local QPS="$2"
@@ -49,9 +44,8 @@ run_load() {
     grep -E "Requests/sec|99%|95%|50%" "$RESULTS_DIR/${LABEL}.txt" | head -5 | sed 's/^/    /'
 }
 
-# Aim for a moderately stressed regime where the difference between
-# client-local and server-local RIF should manifest.
-QPS=300
+# Aim for a moderately stressed regime.
+QPS=600
 
 restart_lb "false"
 run_load "client_local" "$QPS"

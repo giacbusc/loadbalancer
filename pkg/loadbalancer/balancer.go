@@ -23,6 +23,12 @@ type LoadBalancer struct {
 	metrics   *Metrics
 	mutex     sync.RWMutex
 	rrIndex   uint32
+
+	// currentRIFThreshold is recomputed periodically from the GLOBAL probe
+	// pool (all server RIFs), and is the threshold used by HCL to classify
+	// probes as hot or cold. This matches the paper's definition: "an
+	// estimate of the distribution of RIF across replicas".
+	currentRIFThreshold int32
 }
 
 func NewLoadBalancer(config *Config, logger *slog.Logger) *LoadBalancer {
@@ -42,7 +48,6 @@ func NewLoadBalancer(config *Config, logger *slog.Logger) *LoadBalancer {
 	if config.QRIF == 0 {
 		config.QRIF = 0.84
 	}
-
 	return &LoadBalancer{
 		servers:   make([]*Server, 0),
 		probePool: make(map[string]*ProbeResult),
@@ -53,12 +58,17 @@ func NewLoadBalancer(config *Config, logger *slog.Logger) *LoadBalancer {
 	}
 }
 
+// -----------------------------------------------------------------------------
+// Probing
+// -----------------------------------------------------------------------------
+
 func (lb *LoadBalancer) StartProbing() {
 	go func() {
 		ticker := time.NewTicker(lb.config.ProbeInterval)
 		defer ticker.Stop()
 		for range ticker.C {
 			lb.probeAllServers()
+			lb.recomputeGlobalThreshold()
 		}
 	}()
 }
@@ -69,8 +79,11 @@ func (lb *LoadBalancer) probeAllServers() {
 	copy(servers, lb.servers)
 	lb.mutex.RUnlock()
 
+	var wg sync.WaitGroup
 	for _, server := range servers {
+		wg.Add(1)
 		go func(srv *Server) {
+			defer wg.Done()
 			result := lb.probeServer(srv)
 
 			lb.mutex.Lock()
@@ -89,13 +102,13 @@ func (lb *LoadBalancer) probeAllServers() {
 			lb.metrics.serverRIFReported.WithLabelValues(srv.ID, algorithm).Set(float64(result.ServerRIF))
 		}(server)
 	}
+	wg.Wait()
 }
 
 func (lb *LoadBalancer) probeServer(server *Server) *ProbeResult {
 	ctx, cancel := context.WithTimeout(context.Background(), lb.config.ProbeTimeout)
 	defer cancel()
 
-	start := time.Now()
 	req, err := http.NewRequestWithContext(ctx, "GET",
 		"http://"+server.Address+lb.config.HealthCheckPath, nil)
 	if err != nil {
@@ -108,9 +121,8 @@ func (lb *LoadBalancer) probeServer(server *Server) *ProbeResult {
 	}
 	defer resp.Body.Close()
 
-	duration := time.Since(start)
-
-	// Parse server-reported RIF from header (set by backend middleware).
+	// --- Read server-reported signals from response headers --------------
+	// Server-local RIF: how many requests this server is currently handling.
 	var serverRIF int32
 	if v := resp.Header.Get("X-Server-RIF"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
@@ -118,20 +130,67 @@ func (lb *LoadBalancer) probeServer(server *Server) *ProbeResult {
 		}
 	}
 
+	// Server-reported recent-query latency (median of last N completed
+	// queries on the backend). This is the latency signal Prequal §4
+	// recommends: it reflects ACTUAL workload, not /health round-trip.
+	var serverLatencyMs int64
+	if v := resp.Header.Get("X-Server-Latency-P50"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			serverLatencyMs = n
+		}
+	}
+
 	return &ProbeResult{
 		Timestamp: time.Now(),
 		RIF:       atomic.LoadInt32(&server.RIF),
 		ServerRIF: serverRIF,
-		Latency:   duration.Milliseconds(),
+		Latency:   serverLatencyMs,
 		IsHealthy: resp.StatusCode == http.StatusOK,
 	}
 }
+
+// recomputeGlobalThreshold computes the QRIF-th quantile across ALL servers'
+// recent RIF values, and stores it in lb.currentRIFThreshold. This is the
+// "global" view that HCL uses to classify candidates as hot or cold,
+// matching §4 of the paper.
+func (lb *LoadBalancer) recomputeGlobalThreshold() {
+	lb.mutex.RLock()
+	defer lb.mutex.RUnlock()
+
+	if len(lb.servers) == 0 {
+		return
+	}
+	values := make([]int32, 0, len(lb.servers))
+	for _, s := range lb.servers {
+		if !s.IsHealthy {
+			continue
+		}
+		values = append(values, lb.rifFor(s))
+	}
+	if len(values) == 0 {
+		return
+	}
+	sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
+	idx := int(float64(len(values)-1) * lb.config.QRIF)
+	if idx >= len(values) {
+		idx = len(values) - 1
+	}
+	atomic.StoreInt32(&lb.currentRIFThreshold, values[idx])
+}
+
+// -----------------------------------------------------------------------------
+// Server registration
+// -----------------------------------------------------------------------------
 
 func (lb *LoadBalancer) AddServer(server *Server) {
 	lb.mutex.Lock()
 	defer lb.mutex.Unlock()
 	lb.servers = append(lb.servers, server)
 }
+
+// -----------------------------------------------------------------------------
+// Replica selection
+// -----------------------------------------------------------------------------
 
 func (lb *LoadBalancer) SelectServer() *Server {
 	if lb.config.Algorithm == AlgorithmRoundRobin {
@@ -147,17 +206,49 @@ func (lb *LoadBalancer) selectServerRR() *Server {
 	if len(lb.servers) == 0 {
 		return nil
 	}
-	healthyServers := make([]*Server, 0, len(lb.servers))
-	for _, server := range lb.servers {
-		if server.IsHealthy {
-			healthyServers = append(healthyServers, server)
+	healthy := make([]*Server, 0, len(lb.servers))
+	for _, s := range lb.servers {
+		if s.IsHealthy {
+			healthy = append(healthy, s)
 		}
 	}
-	if len(healthyServers) == 0 {
+	if len(healthy) == 0 {
 		return nil
 	}
 	index := atomic.AddUint32(&lb.rrIndex, 1)
-	return healthyServers[int(index-1)%len(healthyServers)]
+	return healthy[int(index-1)%len(healthy)]
+}
+
+// sampleWithoutReplacement picks d distinct indices uniformly at random
+// from [0, n), using a partial Fisher-Yates shuffle. O(d) time, O(n) space
+// only when d is close to n; for d << n we use a small map of swapped indices.
+//
+// This matches the paper's specification: "Probe destinations are sampled
+// uniformly at random WITHOUT replacement from the set of available replicas."
+func sampleWithoutReplacement(n, d int) []int {
+	if d > n {
+		d = n
+	}
+	// Use a map to track which indices have been swapped, avoiding O(n)
+	// allocation when d is small.
+	swap := make(map[int]int, d)
+	out := make([]int, d)
+	for i := 0; i < d; i++ {
+		j := i + rand.Intn(n-i) // pick from [i, n)
+		// Conceptually: swap indices i and j in a virtual array, then
+		// take the element at i. The map records non-default values.
+		ji, ok := swap[j]
+		if !ok {
+			ji = j
+		}
+		ii, ok := swap[i]
+		if !ok {
+			ii = i
+		}
+		swap[j] = ii
+		out[i] = ji
+	}
+	return out
 }
 
 func (lb *LoadBalancer) selectServerPrequal() *Server {
@@ -168,24 +259,21 @@ func (lb *LoadBalancer) selectServerPrequal() *Server {
 		return nil
 	}
 
-	// Sample d candidates with replacement (simplification of the paper's
-	// "without replacement", acceptable when n_servers >> d).
+	// Sample d candidate INDICES without replacement.
 	n := len(lb.servers)
 	d := lb.config.SelectionChoices
 	if d > n {
 		d = n
 	}
+	indices := sampleWithoutReplacement(n, d)
 	candidates := make([]*Server, 0, d)
-	for i := 0; i < d; i++ {
-		candidates = append(candidates, lb.servers[rand.Intn(n)])
+	for _, i := range indices {
+		candidates = append(candidates, lb.servers[i])
 	}
 
 	return lb.selectBestCandidate(candidates)
 }
 
-// rifFor returns the RIF value used for HCL classification.
-// If UseServerRIF is enabled, returns the server-reported RIF;
-// otherwise returns the client-local RIF.
 func (lb *LoadBalancer) rifFor(s *Server) int32 {
 	if lb.config.UseServerRIF {
 		return atomic.LoadInt32(&s.ServerRIF)
@@ -193,6 +281,11 @@ func (lb *LoadBalancer) rifFor(s *Server) int32 {
 	return atomic.LoadInt32(&s.RIF)
 }
 
+// selectBestCandidate applies the Hot-Cold Lexicographic (HCL) rule:
+//  1. Use the GLOBAL RIF threshold (computed in recomputeGlobalThreshold).
+//  2. If at least one candidate is below threshold, return the cold candidate
+//     with the lowest latency.
+//  3. Otherwise, return the hot candidate with the lowest RIF.
 func (lb *LoadBalancer) selectBestCandidate(candidates []*Server) *Server {
 	healthy := make([]*Server, 0, len(candidates))
 	for _, s := range candidates {
@@ -204,7 +297,8 @@ func (lb *LoadBalancer) selectBestCandidate(candidates []*Server) *Server {
 		return nil
 	}
 
-	threshold := lb.calculateRIFThreshold(healthy)
+	// Use the GLOBAL threshold, not a local-to-the-candidates one.
+	threshold := atomic.LoadInt32(&lb.currentRIFThreshold)
 
 	var cold, hot []*Server
 	for _, s := range healthy {
@@ -219,22 +313,6 @@ func (lb *LoadBalancer) selectBestCandidate(candidates []*Server) *Server {
 		return lb.selectLowestLatency(cold)
 	}
 	return lb.selectLowestRIF(hot)
-}
-
-func (lb *LoadBalancer) calculateRIFThreshold(servers []*Server) int32 {
-	if len(servers) == 0 {
-		return 0
-	}
-	values := make([]int32, len(servers))
-	for i, s := range servers {
-		values[i] = lb.rifFor(s)
-	}
-	sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
-	idx := int(float64(len(values)-1) * lb.config.QRIF)
-	if idx >= len(values) {
-		idx = len(values) - 1
-	}
-	return values[idx]
 }
 
 func (lb *LoadBalancer) selectLowestLatency(servers []*Server) *Server {
@@ -264,6 +342,10 @@ func (lb *LoadBalancer) selectLowestRIF(servers []*Server) *Server {
 	}
 	return best
 }
+
+// -----------------------------------------------------------------------------
+// HTTP serving
+// -----------------------------------------------------------------------------
 
 func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	atomic.AddUint64(&lb.stats.TotalRequests, 1)

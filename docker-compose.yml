@@ -7,14 +7,18 @@ services:
     networks:
       - loadbalancer-net
     environment:
-      - BACKEND_SERVER1=server1
-      - BACKEND_SERVER2=server2
-      - BACKEND_SERVER3=server3
       - LB_ALGORITHM=prequal
+      - LB_QRIF=0.84
+      - LB_SELECTION_CHOICES=2
+      - LB_PROBE_INTERVAL=1s
+      - LB_USE_SERVER_RIF=false
+      - BACKENDS=server1:80,server2:80,server3:80,server4:80,server5:80
     depends_on:
       - server1
       - server2
       - server3
+      - server4
+      - server5
 
   loadbalancer-rr:
     build: .
@@ -24,15 +28,16 @@ services:
     networks:
       - loadbalancer-net
     environment:
-      - BACKEND_SERVER1=server1
-      - BACKEND_SERVER2=server2
-      - BACKEND_SERVER3=server3
       - LB_ALGORITHM=roundrobin
+      - BACKENDS=server1:80,server2:80,server3:80,server4:80,server5:80
     depends_on:
       - server1
       - server2
       - server3
+      - server4
+      - server5
 
+  # Heavy antagonist
   server1:
     build: ./backend
     container_name: server1
@@ -41,9 +46,10 @@ services:
     environment:
       - SERVER_ID=server1
       - PORT=80
-      - CPU_LOAD=60
+      - CPU_LOAD=80
     cpus: 1.0
 
+  # Heavy antagonist
   server2:
     build: ./backend
     container_name: server2
@@ -52,9 +58,10 @@ services:
     environment:
       - SERVER_ID=server2
       - PORT=80
-      - CPU_LOAD=60
+      - CPU_LOAD=80
     cpus: 1.0
 
+  # Light antagonist
   server3:
     build: ./backend
     container_name: server3
@@ -62,6 +69,30 @@ services:
       - loadbalancer-net
     environment:
       - SERVER_ID=server3
+      - PORT=80
+      - CPU_LOAD=40
+    cpus: 1.0
+
+  # Clean
+  server4:
+    build: ./backend
+    container_name: server4
+    networks:
+      - loadbalancer-net
+    environment:
+      - SERVER_ID=server4
+      - PORT=80
+      - CPU_LOAD=0
+    cpus: 1.0
+
+  # Clean
+  server5:
+    build: ./backend
+    container_name: server5
+    networks:
+      - loadbalancer-net
+    environment:
+      - SERVER_ID=server5
       - PORT=80
       - CPU_LOAD=0
     cpus: 1.0

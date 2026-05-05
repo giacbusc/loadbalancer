@@ -3,62 +3,87 @@
 Distributed reproduction of the experiments from
 **"Load is not what you should balance: Introducing Prequal"** (NSDI '24).
 
-This branch adapts the original single-host docker-compose project to run on
-a CloudLab cluster as 9 separate physical nodes:
+## Topology (15 nodes)
 
-| Role          | Nodes | IP             | Description                       |
-| ------------- | ----- | -------------- | --------------------------------- |
-| obs           | 1     | 10.10.1.10     | Prometheus + Grafana              |
-| lb-prequal    | 1     | 10.10.1.11     | Load balancer running Prequal     |
-| lb-rr         | 1     | 10.10.1.12     | Load balancer running Round-Robin |
-| server-heavy  | 2     | 10.10.1.21-22  | Backends with antagonist load     |
-| server-clean  | 2     | 10.10.1.23-24  | Clean backends                    |
-| loadgen       | 2     | 10.10.1.31-32  | hey-based load generators         |
+| Role         | Count | IPs                | Purpose                                      |
+| ------------ | ----- | ------------------ | -------------------------------------------- |
+| obs          | 1     | 10.10.1.10         | Prometheus + Grafana                         |
+| lb-prequal   | 1     | 10.10.1.11         | Load balancer running Prequal                |
+| lb-rr        | 1     | 10.10.1.12         | Load balancer running Round-Robin            |
+| backend      | 10    | 10.10.1.21..30     | 4 heavy + 3 light + 3 clean antagonist load  |
+| loadgen      | 2     | 10.10.1.31..32     | hey-based load generators                    |
 
-## What was changed vs. main
+## What's faithful to the paper (and what isn't)
 
-1. Load balancer reads all configuration from environment variables
-   (BACKENDS list, QRIF, probe interval, algorithm, etc.).
-2. Backend reports server-local RIF via `X-Server-RIF` header,
-   enabling the experiment that contrasts client-local vs server-local RIF.
-3. Backend exposes `POST /admin/load?cpu=N` to vary antagonist load at runtime.
-4. New `profile.py` defines the CloudLab topology.
-5. New `cloudlab-setup.sh` is run by each node at boot, installs Docker,
-   clones the repo, and starts the appropriate container per role.
-6. New `run-experiment.sh` reproduces the load-ramp from Figure 6 of the
-   paper, hitting both LBs in parallel and saving hey output.
-7. New `experiment-rif-source.sh` runs the original-question experiment
-   comparing client-local vs server-local RIF as the HCL signal.
+Faithful:
+- **Power of d Choices** with d=2 by default
+- **HCL replica selection rule** with QRIF threshold (default 0.84)
+- **Sampling without replacement** (partial Fisher-Yates shuffle)
+- **Global RIF threshold** (computed across all servers, recomputed every probe round)
+- **Server-reported recent-query latency** (median of last 128 completed queries)
+- **Server-local RIF** signal (read from `X-Server-RIF` header on probe responses)
+- **Real CPU contention** via in-process burner goroutines (not `time.Sleep`)
+- **High-variance query cost** (SHA256 work with stddev = mean)
 
-## How to use on CloudLab
+Still simplified vs. the paper:
+- No "probe pool with reuse limit / age-out / remove-worst" mechanism
+- No sinkhole protection (error-aversion heuristic from §4)
+- Probing is at fixed interval (every 1s), not per-query as in §4
+- 10 servers × 2 LBs is small compared to the paper's 100×100 setup
 
-1. Push this branch to your GitHub fork.
-2. On https://www.cloudlab.us/, create an experiment profile pointing at this
-   repo (Profile Source: "Git Repository", URL: your fork, branch: `cloudlab`).
-3. Instantiate the profile. Wait ~10 minutes for all nodes to finish setup
-   (you can tail `/tmp/cloudlab-setup.log` on each node via SSH).
-4. Verify nothing is on fire:
+## How to run on CloudLab
+
+1. Push the `cloudlab` branch to your GitHub fork.
+2. On https://www.cloudlab.us/, create a profile from this repo
+   (Source: Git Repository, branch: `cloudlab`).
+3. Instantiate. Wait ~10 minutes for all nodes to finish setup
+   (tail `/tmp/cloudlab-setup.log` on a node via SSH to monitor).
+4. Verify everything is up:
    ```bash
-   ssh <user>@lb-prequal   # then: curl localhost:8080/health
-   ssh <user>@server-0     # then: curl localhost:8080/health
+   ssh <user>@lb-prequal.<...>.cloudlab.us
+   curl localhost:8080/health
    ```
 5. Run the main experiment from a loadgen node:
    ```bash
-   ssh <user>@loadgen-0
+   ssh <user>@loadgen-0.<...>.cloudlab.us
    cd /opt/loadbalancer
-   ./run-experiment.sh 60       # 60 seconds per load step
-   ./parse-results.sh /tmp/results-XXXXXXXX
+   ./run-experiment.sh 60                       # 60 seconds per load level
+   ./parse-results.sh /tmp/results-XXXXXXXX     # extract CSV summary
    ```
-6. Open Grafana on the obs node:
-   `http://<obs-public-hostname>:3001` (admin / admin), add Prometheus
-   datasource pointing at `http://10.10.1.10:9090`.
+6. Open Grafana at `http://<obs-public-hostname>:3001` (admin/admin),
+   add Prometheus datasource at `http://10.10.1.10:9090`.
 
-## Run the secondary (client-local vs server-local RIF) experiment
+## Run the secondary experiment (client-local vs server-local RIF)
 
 ```bash
-ssh <user>@loadgen-0
+ssh <user>@loadgen-0.<...>.cloudlab.us
 cd /opt/loadbalancer
 ./experiment-rif-source.sh
 ```
 
-Output is written to `/tmp/rif-source-YYYYMMDD-HHMMSS/`.
+This experiment restarts the lb-prequal container twice, once with
+`LB_USE_SERVER_RIF=false` and once with `=true`, and runs the same load
+against both configurations. The only variable changed between runs is
+the source of the RIF signal used by HCL.
+
+## Tunable parameters (env vars on the lb container)
+
+| Variable                | Default | Description                              |
+|-------------------------|---------|------------------------------------------|
+| LB_ALGORITHM            | prequal | `prequal` or `roundrobin`                |
+| LB_QRIF                 | 0.84    | RIF quantile threshold for HCL           |
+| LB_SELECTION_CHOICES    | 2       | d in Power of d Choices                  |
+| LB_PROBE_INTERVAL       | 1s      | how often to probe each backend          |
+| LB_PROBE_TIMEOUT        | 2s      | probe RPC timeout                        |
+| LB_USE_SERVER_RIF       | false   | use server-local RIF instead of client-local |
+| BACKENDS                | (none)  | comma-separated `host:port` list         |
+
+## Tunable parameters (env vars on backend containers)
+
+| Variable | Default | Description                                |
+|----------|---------|--------------------------------------------|
+| PORT     | 8080    | listen port                                |
+| SERVER_ID| unknown | identifier reported in `X-Served-By`       |
+| CPU_LOAD | 0       | antagonist intensity (0..400). 50 ≈ 1 burner |
+
+The backend exposes `POST /admin/load?cpu=N` to mutate `CPU_LOAD` at runtime.

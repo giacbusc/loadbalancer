@@ -1,53 +1,59 @@
 #!/bin/bash
 # cloudlab-setup.sh — runs once at boot on each CloudLab node.
-# Usage: sudo bash cloudlab-setup.sh <role> <repo_url> <branch>
+# Usage: sudo bash cloudlab-setup.sh <role> <repo_url> <branch> [extra_arg]
 #
-# Roles: obs, lb-prequal, lb-rr, server-heavy, server-clean, loadgen
+# Roles:
+#   obs            -> Prometheus + Grafana
+#   lb-prequal     -> Load balancer (Prequal algorithm)
+#   lb-rr          -> Load balancer (Round-Robin algorithm)
+#   backend        -> Backend server. extra_arg = cpu_load (0..400)
+#   loadgen        -> Load generator (installs hey)
 
 set -e
 
 ROLE="${1:?role required}"
 REPO_URL="${2:?repo_url required}"
 BRANCH="${3:-cloudlab}"
+EXTRA="${4:-0}"
 WORKDIR="/opt/loadbalancer"
 
-echo "==> Cloudlab setup starting (role=$ROLE)"
+echo "==> Cloudlab setup starting (role=$ROLE, extra=$EXTRA)"
 date
 
-# --- 1. Install Docker (if not present) ---------------------------------------
+# --- 1. Install Docker --------------------------------------------------------
 if ! command -v docker >/dev/null 2>&1; then
     echo "==> Installing Docker"
     apt-get update -y
     apt-get install -y ca-certificates curl gnupg lsb-release
     install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+        | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
     chmod a+r /etc/apt/keyrings/docker.gpg
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
 https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
         > /etc/apt/sources.list.d/docker.list
     apt-get update -y
-    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    apt-get install -y docker-ce docker-ce-cli containerd.io \
+                       docker-buildx-plugin docker-compose-plugin
     systemctl enable docker
     systemctl start docker
 fi
 
-# --- 2. Install useful tools --------------------------------------------------
-apt-get install -y git stress-ng jq
+# --- 2. Tooling ---------------------------------------------------------------
+apt-get install -y git stress-ng jq htop
 
-# --- 3. Clone the repo --------------------------------------------------------
+# --- 3. Clone repo ------------------------------------------------------------
 if [ ! -d "$WORKDIR" ]; then
     git clone --branch "$BRANCH" "$REPO_URL" "$WORKDIR"
 else
     cd "$WORKDIR" && git pull
 fi
-
 cd "$WORKDIR"
 
 # --- 4. Per-role startup ------------------------------------------------------
 case "$ROLE" in
 
   obs)
-    # Prometheus + Grafana stack
     cat > /tmp/prometheus.yml <<'EOF'
 global:
   scrape_interval: 5s
@@ -77,7 +83,9 @@ EOF
   lb-prequal|lb-rr)
     ALGO="prequal"
     [ "$ROLE" = "lb-rr" ] && ALGO="roundrobin"
-    BACKENDS="10.10.1.21:8080,10.10.1.22:8080,10.10.1.23:8080,10.10.1.24:8080"
+
+    # All 10 backends, port 8080 each.
+    BACKENDS="10.10.1.21:8080,10.10.1.22:8080,10.10.1.23:8080,10.10.1.24:8080,10.10.1.25:8080,10.10.1.26:8080,10.10.1.27:8080,10.10.1.28:8080,10.10.1.29:8080,10.10.1.30:8080"
 
     docker build -t loadbalancer:latest -f Dockerfile .
     docker rm -f lb 2>/dev/null || true
@@ -93,10 +101,9 @@ EOF
         loadbalancer:latest
     ;;
 
-  server-heavy|server-clean)
-    CPU_LOAD=0
-    [ "$ROLE" = "server-heavy" ] && CPU_LOAD=60
-
+  backend)
+    # extra_arg is the CPU load level (0..400).
+    CPU_LOAD="$EXTRA"
     docker build -t backend:latest -f backend/Dockerfile ./backend
     docker rm -f backend 2>/dev/null || true
     docker run -d --name backend --restart=always \
@@ -108,12 +115,11 @@ EOF
     ;;
 
   loadgen)
-    # Install hey (HTTP load tester) — used by run-experiment.sh later.
     if ! command -v hey >/dev/null 2>&1; then
-        wget -q -O /usr/local/bin/hey https://hey-release.s3.us-east-2.amazonaws.com/hey_linux_amd64
+        wget -q -O /usr/local/bin/hey \
+            https://hey-release.s3.us-east-2.amazonaws.com/hey_linux_amd64
         chmod +x /usr/local/bin/hey
     fi
-    # No long-running service needed; experiments are launched manually.
     ;;
 
   *)
