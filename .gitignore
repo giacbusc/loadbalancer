@@ -31,3 +31,4 @@ go.work.sum
 backend/backend
 backend/go.mod
 backend/go.sum
+.DS_Store
