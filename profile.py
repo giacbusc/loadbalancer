@@ -1,5 +1,5 @@
 """
-Prequal Load Balancer — Distributed Experiment on CloudLab
+Prequal Load Balancer
 
 Topology (15 nodes):
   - 1 obs        — Prometheus + Grafana
@@ -8,7 +8,7 @@ Topology (15 nodes):
   - 2 loadgens   — for hey-based load generation
 
 The antagonist is a real in-process CPU burner (goroutines spinning on
-arithmetic), not a time.Sleep. This produces actual CPU contention with
+arithmetic). This produces actual CPU contention with
 the request-serving threads, faithful to the paper's experimental setup.
 """
 
@@ -27,7 +27,7 @@ pc.defineParameter(
 pc.defineParameter(
     "repo_url", "Git repository URL",
     portal.ParameterType.STRING,
-    "https://github.com/YOUR_USERNAME/loadbalancer.git",
+    "https://github.com/giacbusc/loadbalancer.git",
 )
 pc.defineParameter(
     "repo_branch", "Git branch",
