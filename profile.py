@@ -1,12 +1,11 @@
-# -*- coding: utf-8 -*-
 """
-Prequal Load Balancer
+Prequal Load Balancer - Distributed Experiment on CloudLab
 
 Topology (15 nodes):
-  - 1 obs        — Prometheus + Grafana
-  - 2 LBs        — one running Prequal, one running Round-Robin
-  - 10 backends  — 4 with heavy antagonist, 3 with light, 3 clean
-  - 2 loadgens   — for hey-based load generation
+  - 1 obs        : Prometheus + Grafana
+  - 2 LBs        : one running Prequal, one running Round-Robin
+  - 10 backends  : 4 with heavy antagonist, 3 with light, 3 clean
+  - 2 loadgens   : for hey-based load generation
 
 The antagonist is a real in-process CPU burner (goroutines spinning on
 arithmetic). This produces actual CPU contention with
@@ -28,7 +27,7 @@ pc.defineParameter(
 pc.defineParameter(
     "repo_url", "Git repository URL",
     portal.ParameterType.STRING,
-    "https://github.com/giacbusc/loadbalancer.git",
+    "https://github.com/YOUR_USERNAME/loadbalancer.git",
 )
 pc.defineParameter(
     "repo_branch", "Git branch",
