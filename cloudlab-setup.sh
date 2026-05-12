@@ -13,7 +13,7 @@ set -e
 
 ROLE="${1:?role required}"
 REPO_URL="${2:?repo_url required}"
-BRANCH="${3:-cloudlab}"
+BRANCH="${3:-main}"
 EXTRA="${4:-0}"
 WORKDIR="/opt/loadbalancer"
 

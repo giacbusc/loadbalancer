@@ -27,11 +27,11 @@ pc.defineParameter(
 pc.defineParameter(
     "repo_url", "Git repository URL",
     portal.ParameterType.STRING,
-    "https://github.com/YOUR_USERNAME/loadbalancer.git",
+    "https://github.com/giacbusc/loadbalancer.git",
 )
 pc.defineParameter(
     "repo_branch", "Git branch",
-    portal.ParameterType.STRING, "cloudlab",
+    portal.ParameterType.STRING, "main",
 )
 params = pc.bindParameters()
 
