@@ -133,10 +133,11 @@ func (lb *LoadBalancer) probeServer(server *Server) *ProbeResult {
 	// Server-reported recent-query latency (median of last N completed
 	// queries on the backend). This is the latency signal Prequal §4
 	// recommends: it reflects ACTUAL workload, not /health round-trip.
-	var serverLatencyMs int64
+	// Unit: microseconds.
+	var serverLatencyUs int64
 	if v := resp.Header.Get("X-Server-Latency-P50"); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-			serverLatencyMs = n
+			serverLatencyUs = n
 		}
 	}
 
@@ -144,7 +145,7 @@ func (lb *LoadBalancer) probeServer(server *Server) *ProbeResult {
 		Timestamp: time.Now(),
 		RIF:       atomic.LoadInt32(&server.RIF),
 		ServerRIF: serverRIF,
-		Latency:   serverLatencyMs,
+		Latency:   serverLatencyUs,
 		IsHealthy: resp.StatusCode == http.StatusOK,
 	}
 }

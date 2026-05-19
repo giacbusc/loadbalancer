@@ -63,7 +63,7 @@ func (p *Prober) ProbeServer(ctx context.Context, server *loadbalancer.Server) *
 	}
 	defer resp.Body.Close()
 
-	result.Latency = time.Since(start).Milliseconds()
+	result.Latency = time.Since(start).Microseconds()
 
 	if rifStr := resp.Header.Get("X-Requests-In-Flight"); rifStr != "" {
 		var rif int32

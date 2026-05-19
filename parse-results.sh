@@ -6,7 +6,7 @@ set -e
 DIR="${1:?results dir required}"
 
 OUT="$DIR/summary.csv"
-echo "algorithm,level,qps,total_req,p50_ms,p90_ms,p95_ms,p99_ms,errors" > "$OUT"
+echo "algorithm,level,qps,total_req,p50_us,p90_us,p95_us,p99_us,errors" > "$OUT"
 
 for ALGO in prequal rr; do
     for f in "$DIR"/${ALGO}_*.txt; do
@@ -25,14 +25,14 @@ for ALGO in prequal rr; do
         P95=$(grep "95% in" "$f" | awk '{print $3}' | head -1)
         P99=$(grep "99% in" "$f" | awk '{print $3}' | head -1)
 
-        # hey outputs in seconds — convert to ms.
-        ms() { echo "$1" | awk '{printf "%.2f", $1*1000}'; }
+        # hey outputs in seconds — convert to µs.
+        us() { echo "$1" | awk '{printf "%.0f", $1*1000000}'; }
 
         ERRORS=$(grep -A 100 "Status code distribution" "$f" \
                  | grep -E "^\s+\[5[0-9]{2}\]" \
                  | awk '{sum+=$2} END {print sum+0}')
 
-        echo "$ALGO,$LEVEL,$QPS,$TOTAL,$(ms $P50),$(ms $P90),$(ms $P95),$(ms $P99),$ERRORS" >> "$OUT"
+        echo "$ALGO,$LEVEL,$QPS,$TOTAL,$(us $P50),$(us $P90),$(us $P95),$(us $P99),$ERRORS" >> "$OUT"
     done
 done
 

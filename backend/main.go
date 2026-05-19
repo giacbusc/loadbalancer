@@ -226,7 +226,7 @@ func main() {
 		}
 
 		duration := time.Since(start)
-		window.record(duration.Milliseconds())
+		window.record(duration.Microseconds())
 
 		w.Header().Set("Content-Type", "text/html")
 		w.Header().Set("X-Served-By", serverID)
@@ -243,7 +243,7 @@ func main() {
 		w.Header().Set("X-Server-RIF", strconv.Itoa(int(atomic.LoadInt32(&serverRIF))))
 		w.Header().Set("X-Server-Latency-P50", strconv.FormatInt(window.median(), 10))
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, `{"status":"healthy","server_id":"%s","rif":%d,"cpu_load":%d,"p50_ms":%d}`,
+		fmt.Fprintf(w, `{"status":"healthy","server_id":"%s","rif":%d,"cpu_load":%d,"p50_us":%d}`,
 			serverID,
 			atomic.LoadInt32(&serverRIF),
 			atomic.LoadInt32(&cpuLoad),
@@ -274,7 +274,7 @@ func main() {
 
 	// --- /stats  --- human-readable debug --------------------------------
 	http.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "server_id=%s rif=%d cpu_load=%d p50_ms=%d\n",
+		fmt.Fprintf(w, "server_id=%s rif=%d cpu_load=%d p50_us=%d\n",
 			serverID,
 			atomic.LoadInt32(&serverRIF),
 			atomic.LoadInt32(&cpuLoad),
