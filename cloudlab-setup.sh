@@ -77,6 +77,8 @@ EOF
         -p 3001:3000 \
         -e GF_SECURITY_ADMIN_USER=admin \
         -e GF_SECURITY_ADMIN_PASSWORD=admin \
+        -v "$WORKDIR/config/grafana/provisioning:/etc/grafana/provisioning" \
+        -v "$WORKDIR/config/grafana/dashboards:/var/lib/grafana/dashboards" \
         grafana/grafana
     ;;
 
