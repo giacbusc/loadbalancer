@@ -1,7 +1,14 @@
 #!/bin/bash
-# run-experiment.sh — main load-ramp experiment, replicating Figure 6 of the
-# Prequal paper. Runs from a loadgen node and targets both LBs in parallel
-# against a pool of 10 backends with heterogeneous antagonist load.
+# run-experiment.sh - Load-ramp experiment, FIXED VERSION.
+#
+# Key fixes vs. the broken version:
+#   1. Real saturation discovery: an uncapped hey burst finds the TRUE
+#      max throughput, instead of trusting a "-q 200" that hey ignores.
+#   2. Absolute QPS levels around and BEYOND that saturation point, so the
+#      system actually enters the overload regime where Prequal vs RR diverge.
+#   3. Antagonists must be strong (set in profile.py: cpu_load 350/150/0).
+#
+# Usage: ./run-experiment.sh [duration_per_step]   (default 60)
 
 set -e
 
@@ -9,51 +16,69 @@ DURATION="${1:-60}"
 LB_PREQUAL="http://10.10.1.11:8080"
 LB_RR="http://10.10.1.12:8080"
 RESULTS_DIR="/tmp/results-$(date +%Y%m%d-%H%M%S)"
-
 mkdir -p "$RESULTS_DIR"
 
 echo "============================================="
-echo "Prequal vs Round-Robin — Load Ramp"
+echo "Prequal vs Round-Robin - Load Ramp (fixed)"
 echo "============================================="
 echo "Duration per step:  ${DURATION}s"
 echo "Results directory:  $RESULTS_DIR"
 echo
 
-# Sanity check.
 for url in "$LB_PREQUAL/health" "$LB_RR/health"; do
     if ! curl -fsS "$url" > /dev/null; then
         echo "ERROR: $url not reachable" >&2
         exit 1
     fi
 done
-echo "Both LBs are reachable."
+echo "Both LBs reachable."
 echo
 
-# 1. Calibration.
-echo "--- Calibration (15s @ Prequal) ---"
-hey -z 15s -q 200 -c 50 "$LB_PREQUAL" > "$RESULTS_DIR/calibration.txt" 2>&1
-BASELINE=$(grep "Requests/sec:" "$RESULTS_DIR/calibration.txt" | awk '{print $2}' | head -1)
-BASELINE_INT=${BASELINE%.*}
-echo "Baseline throughput: ${BASELINE_INT} req/s"
+# ---------------------------------------------------------------------------
+# STEP 1: Discover the TRUE saturation throughput.
+# We send an UNCAPPED burst (no -q) with high concurrency. hey will push as
+# hard as it can; Requests/sec is then the real ceiling under this workload
+# and the current antagonist configuration.
+# ---------------------------------------------------------------------------
+echo "--- Saturation discovery (20s, uncapped, c=200) ---"
+hey -z 20s -c 200 "$LB_PREQUAL" > "$RESULTS_DIR/saturation.txt" 2>&1
+SAT=$(grep -E "^[[:space:]]*Requests/sec:" "$RESULTS_DIR/saturation.txt" | awk '{print $2}' | head -1)
+SAT_INT=${SAT%.*}
+echo "Measured saturation throughput: ${SAT_INT} req/s"
 echo
 
-# 2. Load ramp.
-LEVELS=(0.75 0.83 0.93 1.03 1.14 1.27 1.41 1.57 1.74)
-NAMES=("75pct" "83pct" "93pct" "103pct" "114pct" "127pct" "141pct" "157pct" "174pct")
+if [ -z "$SAT_INT" ] || [ "$SAT_INT" -lt 100 ]; then
+    echo "ERROR: saturation discovery failed (got '$SAT_INT'). Check hey and LBs." >&2
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# STEP 2: Ramp the load from clearly-under-capacity to clearly-over-capacity.
+# We go from 0.6x of saturation up to 1.8x. Above 1.0x the system is
+# overloaded; this is the zone where RR collapses and Prequal holds.
+# We CAP hey with -q so the requested rate is enforced. We also raise
+# concurrency so the cap is actually reachable.
+# ---------------------------------------------------------------------------
+LEVELS=(0.60 0.75 0.90 1.00 1.10 1.25 1.45 1.65 1.80)
+NAMES=("60pct" "75pct" "90pct" "100pct" "110pct" "125pct" "145pct" "165pct" "180pct")
 
 for i in "${!LEVELS[@]}"; do
     LEVEL=${LEVELS[$i]}
     NAME=${NAMES[$i]}
-    QPS=$(echo "$BASELINE_INT * $LEVEL" | bc | awk '{printf "%.0f", $1}')
+    QPS=$(awk -v s="$SAT_INT" -v l="$LEVEL" 'BEGIN{printf "%.0f", s*l}')
 
     echo "==================================="
-    echo "Step $((i+1))/9 — $NAME (~${QPS} req/s)"
+    echo "Step $((i+1))/9 - $NAME (target ${QPS} req/s)"
     echo "==================================="
 
-    hey -z "${DURATION}s" -q "$QPS" -c 50 "$LB_PREQUAL" \
+    # Concurrency high enough to actually drive QPS even when the system
+    # is slow under overload (otherwise hey self-throttles).
+    CONC=300
+
+    hey -z "${DURATION}s" -q "$QPS" -c "$CONC" "$LB_PREQUAL" \
         > "$RESULTS_DIR/prequal_${NAME}.txt" 2>&1 &
     PID_P=$!
-    hey -z "${DURATION}s" -q "$QPS" -c 50 "$LB_RR" \
+    hey -z "${DURATION}s" -q "$QPS" -c "$CONC" "$LB_RR" \
         > "$RESULTS_DIR/rr_${NAME}.txt" 2>&1 &
     PID_R=$!
 
@@ -69,9 +94,6 @@ for i in "${!LEVELS[@]}"; do
 done
 
 echo "============================================="
-echo "Experiment complete!"
-echo "Results in: $RESULTS_DIR"
+echo "Experiment complete. Results in: $RESULTS_DIR"
+echo "Parse with: ./parse-results.sh $RESULTS_DIR"
 echo "============================================="
-echo
-echo "To extract a CSV summary:"
-echo "  ./parse-results.sh $RESULTS_DIR"

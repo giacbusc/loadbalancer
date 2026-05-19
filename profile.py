@@ -1,15 +1,20 @@
 """
 Prequal Load Balancer - Distributed Experiment on CloudLab
 
+FIXED for m510 (8 cores per node): antagonist intensity raised so that
+"heavy" servers are dramatically slower than "clean" ones, recreating the
+paper's scenario of contended vs. uncontended replicas.
+
 Topology (15 nodes):
   - 1 obs        : Prometheus + Grafana
-  - 2 LBs        : one running Prequal, one running Round-Robin
-  - 10 backends  : 4 with heavy antagonist, 3 with light, 3 clean
-  - 2 loadgens   : for hey-based load generation
+  - 2 LBs        : Prequal and Round-Robin
+  - 10 backends  : 4 heavy (7 burners) + 3 light (3 burners) + 3 clean
+  - 2 loadgens
 
-The antagonist is a real in-process CPU burner (goroutines spinning on
-arithmetic). This produces actual CPU contention with
-the request-serving threads, faithful to the paper's experimental setup.
+cpu_load -> burners mapping in backend (applyCPULoad): n = load/50
+  cpu_load=350 -> 7 burners -> saturates 7 of 8 cores  (server ~7x slower)
+  cpu_load=150 -> 3 burners -> saturates 3 of 8 cores
+  cpu_load=0   -> 0 burners -> clean
 """
 
 import geni.portal as portal
@@ -18,11 +23,10 @@ import geni.rspec.pg as rspec
 pc = portal.Context()
 request = pc.makeRequestRSpec()
 
-# -- Parameters ----------------------------------------------------------------
 pc.defineParameter(
     "hardware_type", "Hardware type",
-    portal.ParameterType.NODETYPE, "d710",
-    longDescription="d710 (Utah) is a safe default. c220g5 (Wisconsin) is more modern."
+    portal.ParameterType.NODETYPE, "m510",
+    longDescription="m510 (Utah) has good availability and 8 cores per node."
 )
 pc.defineParameter(
     "repo_url", "Git repository URL",
@@ -35,9 +39,8 @@ pc.defineParameter(
 )
 params = pc.bindParameters()
 
-# -- LAN -----------------------------------------------------------------------
 lan = request.LAN("expLAN")
-lan.bandwidth = 1000000  # 1 Gbps
+lan.bandwidth = 1000000
 
 UBUNTU_IMAGE = "urn:publicid:IDN+emulab.net+image+emulab-ops//UBUNTU22-64-STD"
 
@@ -45,11 +48,9 @@ def make_node(name, role, ip, extra_args=""):
     n = request.RawPC(name)
     n.hardware_type = params.hardware_type
     n.disk_image = UBUNTU_IMAGE
-
     iface = n.addInterface("if0")
     iface.addAddress(rspec.IPv4Address(ip, "255.255.255.0"))
     lan.addInterface(iface)
-
     n.addService(rspec.Execute(
         shell="bash",
         command=("sudo -H bash /local/repository/cloudlab-setup.sh "
@@ -61,26 +62,15 @@ def make_node(name, role, ip, extra_args=""):
     ))
     return n
 
-# -- Topology ------------------------------------------------------------------
-# IP plan on 10.10.1.0/24:
-#   10.10.1.10        obs
-#   10.10.1.11        lb-prequal
-#   10.10.1.12        lb-rr
-#   10.10.1.21..30    server-0 .. server-9
-#   10.10.1.31..32    loadgen-0, loadgen-1
-
 make_node("obs",        "obs",         "10.10.1.10")
 make_node("lb-prequal", "lb-prequal",  "10.10.1.11")
 make_node("lb-rr",      "lb-rr",       "10.10.1.12")
 
-# 10 backends with heterogeneous antagonist load:
-#   4 heavy (cpu_load=80)
-#   3 light (cpu_load=40)
-#   3 clean (cpu_load=0)
+# STRONG antagonists for m510 (8 cores).
 backend_specs = [
-    ("server-0", 260), ("server-1", 160), ("server-2", 160), ("server-3", 120),
-    ("server-4", 120), ("server-5", 80), ("server-6", 80),
-    ("server-7", 40),  ("server-8", 0),  ("server-9", 0),
+    ("server-0", 350), ("server-1", 350), ("server-2", 350), ("server-3", 350),
+    ("server-4", 150), ("server-5", 150), ("server-6", 150),
+    ("server-7", 0),   ("server-8", 0),   ("server-9", 0),
 ]
 for i, (name, cpu_load) in enumerate(backend_specs):
     make_node(name, "backend", "10.10.1.{}".format(21 + i), extra_args=str(cpu_load))
