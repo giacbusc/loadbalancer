@@ -78,9 +78,9 @@ make_node("lb-rr",      "lb-rr",       "10.10.1.12")
 #   3 light (cpu_load=40)
 #   3 clean (cpu_load=0)
 backend_specs = [
-    ("server-0", 80), ("server-1", 80), ("server-2", 80), ("server-3", 80),
-    ("server-4", 40), ("server-5", 40), ("server-6", 40),
-    ("server-7", 0),  ("server-8", 0),  ("server-9", 0),
+    ("server-0", 260), ("server-1", 160), ("server-2", 160), ("server-3", 120),
+    ("server-4", 120), ("server-5", 80), ("server-6", 80),
+    ("server-7", 40),  ("server-8", 0),  ("server-9", 0),
 ]
 for i, (name, cpu_load) in enumerate(backend_specs):
     make_node(name, "backend", "10.10.1.{}".format(21 + i), extra_args=str(cpu_load))

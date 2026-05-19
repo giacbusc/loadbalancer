@@ -98,14 +98,32 @@ func stopAllBurners() {
 //	load=200 -> 4 burners
 func applyCPULoad(load int32) {
 	stopAllBurners()
-	if load <= 0 {
-		return
+	n := 0
+	switch {
+	case load <= 0:
+		n =  0
+	case load < 50:
+		n = 1
+	case load < 100:
+		n = 2
+	case load < 150:
+		n = 3
+	case load < 200:
+		n = 4
+	case load < 250:
+		n = 5
+	case load < 300:
+		n = 6
+	case load < 350:
+		n = 7
+	default:
+		n = 8
 	}
 	// Roughly: 1 burner per 50 units of load.
-	n := int(load) / 50
-	if n < 1 && load > 0 {
-		n = 1
-	}
+	//n := int(load) / 50
+	//if n < 1 && load > 0 {
+	//	n = 1
+	//}
 	startCPUBurners(n)
 }
 
