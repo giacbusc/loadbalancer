@@ -73,12 +73,15 @@ for i in "${!LEVELS[@]}"; do
 
     # Concurrency high enough to actually drive QPS even when the system
     # is slow under overload (otherwise hey self-throttles).
+    # NOTE: hey's -q is per-worker, so divide total target QPS by concurrency.
     CONC=300
+    QPS_PER_WORKER=$(awk -v q="$QPS" -v c="$CONC" 'BEGIN{printf "%.0f", q/c}')
+    [ "$QPS_PER_WORKER" -lt 1 ] && QPS_PER_WORKER=1
 
-    hey -z "${DURATION}s" -q "$QPS" -c "$CONC" "$LB_PREQUAL" \
+    hey -z "${DURATION}s" -q "$QPS_PER_WORKER" -c "$CONC" "$LB_PREQUAL" \
         > "$RESULTS_DIR/prequal_${NAME}.txt" 2>&1 &
     PID_P=$!
-    hey -z "${DURATION}s" -q "$QPS" -c "$CONC" "$LB_RR" \
+    hey -z "${DURATION}s" -q "$QPS_PER_WORKER" -c "$CONC" "$LB_RR" \
         > "$RESULTS_DIR/rr_${NAME}.txt" 2>&1 &
     PID_R=$!
 
