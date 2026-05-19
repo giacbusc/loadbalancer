@@ -116,8 +116,9 @@ EOF
 
   loadgen)
     if ! command -v hey >/dev/null 2>&1; then
-        wget -q -O /usr/local/bin/hey \
-            https://hey-release.s3.us-east-2.amazonaws.com/hey_linux_amd64
+        HEY_URL=$(curl -fsSL https://api.github.com/repos/rakyll/hey/releases/latest \
+                  | jq -r '.assets[] | select(.name == "hey_linux_amd64") | .browser_download_url')
+        curl -fsSL "$HEY_URL" -o /usr/local/bin/hey
         chmod +x /usr/local/bin/hey
     fi
     ;;

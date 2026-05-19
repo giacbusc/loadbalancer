@@ -15,7 +15,9 @@ for ALGO in prequal rr; do
         LEVEL=${BASE#${ALGO}_}
 
         QPS=$(grep "Requests/sec:" "$f" | awk '{print $2}' | head -1)
-        TOTAL=$(grep "Total:" "$f" | awk '{print $2}' | head -1)
+        TOTAL=$(grep -A 200 "Status code distribution" "$f" \
+                | grep -E "^\s+\[[0-9]{3}\]" \
+                | awk '{sum+=$2} END {print sum+0}')
 
         # Extract latency percentiles (hey's output uses lines like "  50% in 0.0xxx secs")
         P50=$(grep "50% in" "$f" | awk '{print $3}' | head -1)
