@@ -260,8 +260,18 @@ func (lb *LoadBalancer) selectServerPrequal() *Server {
 		return nil
 	}
 
-	// Sample d candidate INDICES without replacement.
-	n := len(lb.servers)
+	healthy := make([]*Server, 0, len(lb.servers))
+	for _, s := range lb.servers {
+		if s.IsHealthy {
+			healthy = append(healthy, s)
+		}
+	}
+	if len(healthy) == 0 {
+		return nil
+	}
+
+	// Sample d candidate INDICES without replacement from healthy pool only.
+	n := len(healthy)
 	d := lb.config.SelectionChoices
 	if d > n {
 		d = n
@@ -269,7 +279,7 @@ func (lb *LoadBalancer) selectServerPrequal() *Server {
 	indices := sampleWithoutReplacement(n, d)
 	candidates := make([]*Server, 0, d)
 	for _, i := range indices {
-		candidates = append(candidates, lb.servers[i])
+		candidates = append(candidates, healthy[i])
 	}
 
 	return lb.selectBestCandidate(candidates)
