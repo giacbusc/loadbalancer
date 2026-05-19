@@ -40,11 +40,13 @@ echo
 # hard as it can; Requests/sec is then the real ceiling under this workload
 # and the current antagonist configuration.
 # ---------------------------------------------------------------------------
-echo "--- Saturation discovery (20s, uncapped, c=200) ---"
-hey -z 20s -c 200 "$LB_PREQUAL" > "$RESULTS_DIR/saturation.txt" 2>&1
-SAT=$(grep -E "^[[:space:]]*Requests/sec:" "$RESULTS_DIR/saturation.txt" | awk '{print $2}' | head -1)
+echo "--- Saturation discovery (20s, uncapped, c=200, both LBs) ---"
+hey -z 20s -c 200 "$LB_PREQUAL" > "$RESULTS_DIR/saturation_prequal.txt" 2>&1 &
+hey -z 20s -c 200 "$LB_RR"     > "$RESULTS_DIR/saturation_rr.txt"     2>&1 &
+wait
+SAT=$(grep -E "^[[:space:]]*Requests/sec:" "$RESULTS_DIR/saturation_prequal.txt" | awk '{print $2}' | head -1)
 SAT_INT=${SAT%.*}
-echo "Measured saturation throughput: ${SAT_INT} req/s"
+echo "Measured saturation throughput (per LB, both running): ${SAT_INT} req/s"
 echo
 
 if [ -z "$SAT_INT" ] || [ "$SAT_INT" -lt 100 ]; then
