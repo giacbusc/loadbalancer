@@ -8,11 +8,22 @@
 #      system actually enters the overload regime where Prequal vs RR diverge.
 #   3. Antagonists must be strong (set in profile.py: cpu_load 350/150/0).
 #
-# Usage: ./run-experiment.sh [duration_per_step]   (default 60)
+# Usage: ./run-experiment.sh [duration_per_step] [dynamic]   (default: 60, static)
+#
+# Esempi:
+#   ./run-experiment.sh          # 60s per step, antagonisti statici
+#   ./run-experiment.sh 60       # idem esplicito
+#   ./run-experiment.sh 60 dynamic   # antagonisti dinamici (cambiano ogni 10s)
+#
+# Con "dynamic" viene avviato dynamic-antagonist.sh in background;
+# ad ogni step dell'esperimento i server cambiano carico ciclicamente,
+# rendendo più evidente la differenza tra Prequal e Round-Robin.
 
 set -e
 
 DURATION="${1:-60}"
+DYNAMIC="${2:-}"          # se "dynamic", avvia il ciclo antagonista
+ANTAG_PID=""              # PID del processo antagonista (se avviato)
 LB_PREQUAL="http://10.10.1.11:8080"
 LB_RR="http://10.10.1.12:8080"
 RESULTS_DIR="/tmp/results-$(date +%Y%m%d-%H%M%S)"
@@ -22,6 +33,7 @@ echo "============================================="
 echo "Prequal vs Round-Robin - Load Ramp (fixed)"
 echo "============================================="
 echo "Duration per step:  ${DURATION}s"
+echo "Antagonist mode:    ${DYNAMIC:-static}"
 echo "Results directory:  $RESULTS_DIR"
 echo
 
@@ -33,6 +45,41 @@ for url in "$LB_PREQUAL/health" "$LB_RR/health"; do
 done
 echo "Both LBs reachable."
 echo
+
+# ---------------------------------------------------------------------------
+# ANTAGONISTA DINAMICO (opzionale)
+# Avvia dynamic-antagonist.sh in background se richiesto.
+# Lo script cambia il carico dei backend ogni 10s chiamando /admin/load.
+# ---------------------------------------------------------------------------
+if [ "$DYNAMIC" = "dynamic" ]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    ANTAG_SCRIPT="$SCRIPT_DIR/dynamic-antagonist.sh"
+    if [ ! -x "$ANTAG_SCRIPT" ]; then
+        echo "ERROR: $ANTAG_SCRIPT non trovato o non eseguibile." >&2
+        echo "  Esegui: chmod +x dynamic-antagonist.sh" >&2
+        exit 1
+    fi
+    echo "--- Avvio dynamic-antagonist.sh in background ---"
+    ANTAG_LOG="/tmp/antagonist-$(date +%Y%m%d-%H%M%S).log"
+    ANTAG_LOG="$ANTAG_LOG" "$ANTAG_SCRIPT" &
+    ANTAG_PID=$!
+    echo "  PID antagonista: $ANTAG_PID"
+    echo "  Log antagonista: $ANTAG_LOG"
+    sleep 3   # lascia tempo all'antagonista di applicare il primo stato
+    echo "  Antagonista attivo."
+    echo
+fi
+
+# Registra cleanup: ferma l'antagonista e ripristina il carico base
+cleanup() {
+    if [ -n "$ANTAG_PID" ] && kill -0 "$ANTAG_PID" 2>/dev/null; then
+        echo ""
+        echo "--- Arresto dynamic-antagonist (PID $ANTAG_PID) ---"
+        kill "$ANTAG_PID" 2>/dev/null || true
+        wait "$ANTAG_PID" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT INT TERM
 
 # ---------------------------------------------------------------------------
 # STEP 1: Discover the TRUE saturation throughput.
@@ -101,4 +148,7 @@ done
 echo "============================================="
 echo "Experiment complete. Results in: $RESULTS_DIR"
 echo "Parse with: ./parse-results.sh $RESULTS_DIR"
+if [ -n "$ANTAG_PID" ]; then
+    echo "Antagonist log:    $ANTAG_LOG"
+fi
 echo "============================================="

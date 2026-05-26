@@ -122,6 +122,8 @@ EOF
         curl -fsSL "$HEY_URL" -o /usr/local/bin/hey
         chmod +x /usr/local/bin/hey
     fi
+    # Rendi eseguibili tutti gli script dell'esperimento
+    chmod +x "$WORKDIR"/*.sh
     ;;
 
   *)
