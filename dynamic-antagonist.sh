@@ -123,6 +123,7 @@ cleanup() {
     echo "[$(date '+%H:%M:%S')] EXIT — ripristino BASELINE..." | tee -a "$LOG"
     apply_state 0
     echo "[$(date '+%H:%M:%S')] Ripristino completato. PID=$$ terminato." | tee -a "$LOG"
+    exit 0
 }
 trap cleanup EXIT INT TERM
 
