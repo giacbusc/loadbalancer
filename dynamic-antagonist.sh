@@ -37,7 +37,7 @@
 
 set -uo pipefail
 
-INTERVAL="${ANTAG_INTERVAL:-10}"
+INTERVAL="${ANTAG_INTERVAL:-5}"
 PORT=8080
 LOG="${ANTAG_LOG:-/tmp/antagonist-$(date +%Y%m%d-%H%M%S).log}"
 
@@ -70,22 +70,22 @@ SERVERS=(
 # ---------------------------------------------------------------------------
 
 STATE_NAMES=(
-    "BASELINE — 4×350 + 3×150 + 3×0   (config originale di riferimento)"
-    "SURGE    — 7×350 + 3×0            (tutti gli antagonisti al massimo)"
-    "SHIFT    — s0..3 diventano clean, s4..6 diventano heavy (ruoli invertiti)"
-    "RELIEF   — solo 2 server pesanti, il resto è clean"
-    "STORM    — massima contesa su tutti e 10 i server"
-    "CALM     — un solo server pesante, tutti gli altri clean"
+    "BASELINE — 4×350 + 3×300 + 3×150  (carico distribuito pesante)"
+    "SURGE    — 10×350                  (tutti al massimo assoluto)"
+    "SHIFT    — s0..3 clean, s4..6 max, s7..9 heavy (inversione netta)"
+    "RELIEF   — 3 server al massimo, il resto è clean"
+    "STORM    — carico alternato 350/300 su tutti e 10 i server"
+    "CALM     — 2 server pesanti, tutti gli altri clean"
 )
 
 # 10 valori per riga: s0 s1 s2 s3  s4 s5 s6  s7 s8 s9
 STATES=(
-    "350 350 350 350  150 150 150    0   0   0"   # 1 BASELINE
-    "350 350 350 350  350 350 350    0   0   0"   # 2 SURGE
-    "  0   0   0   0  350 350 350    0   0   0"   # 3 SHIFT   ← inversione netta
-    "350 350   0   0    0   0   0    0   0   0"   # 4 RELIEF
-    "350 350 350 350  300 300 300  250 250 100"   # 5 STORM
-    "350   0   0   0    0   0   0    0   0   0"   # 6 CALM
+    "350 350 350 350  300 300 300  150 150 150"   # 1 BASELINE
+    "350 350 350 350  350 350 350  350 350 350"   # 2 SURGE    ← tutti al max
+    "  0   0   0   0  350 350 350  300 300 300"   # 3 SHIFT    ← inversione netta
+    "350 350 350   0    0   0   0    0   0   0"   # 4 RELIEF
+    "350 300 350 300  350 300 350  300 350 300"   # 5 STORM    ← caos su tutti
+    "350 350   0   0    0   0   0    0   0   0"   # 6 CALM
 )
 
 NUM_STATES=${#STATES[@]}
