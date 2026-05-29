@@ -128,10 +128,10 @@ for i in "${!LEVELS[@]}"; do
     CONC=300
     QPS_PER_WORKER=$(awk -v q="$QPS" -v c="$CONC" 'BEGIN{printf "%.2f", q/c}')
 
-    hey -z "${DURATION}s" -q "$QPS_PER_WORKER" -c "$CONC" -t 2.5 "$LB_PREQUAL" \
+    hey -z "${DURATION}s" -q "$QPS_PER_WORKER" -c "$CONC" -t 5 "$LB_PREQUAL" \
         > "$RESULTS_DIR/prequal_${NAME}.txt" 2>&1 &
     PID_P=$!
-    hey -z "${DURATION}s" -q "$QPS_PER_WORKER" -c "$CONC" -t 2.5 "$LB_RR" \
+    hey -z "${DURATION}s" -q "$QPS_PER_WORKER" -c "$CONC" -t 5 "$LB_RR" \
         > "$RESULTS_DIR/rr_${NAME}.txt" 2>&1 &
     PID_R=$!
 
