@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate a figure similar to Figure 6 of the Prequal paper
+Generate a figure similar to Figure 6 of the Prequal paper (BRANCH)
 (Load ramp experiment: tail latency comparison between RR and Prequal)
 """
 
