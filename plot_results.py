@@ -2,8 +2,13 @@
 """
 Generate a figure similar to Figure 6 of the Prequal paper (BRANCH)
 (Load ramp experiment: tail latency comparison between RR and Prequal)
+
+Usage:
+  python3 plot_results.py                                     # static default
+  python3 plot_results.py results-20260529-093148_DINAMIC     # any results dir
 """
 
+import sys
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -11,7 +16,8 @@ import matplotlib.ticker as ticker
 import numpy as np
 
 # ── Load data ──────────────────────────────────────────────────────────────────
-df = pd.read_csv("results-20260519-100906/summary.csv")
+results_dir = sys.argv[1] if len(sys.argv) > 1 else "results-20260519-100906"
+df = pd.read_csv(f"{results_dir}/summary.csv")
 
 # Parse load level as integer
 df["load"] = df["level"].str.replace("pct", "").astype(int)
@@ -29,7 +35,8 @@ fig, (ax1, ax2) = plt.subplots(
     figsize=(9, 8),
     gridspec_kw={"height_ratios": [3, 1.4]},
 )
-fig.suptitle("Load Ramp Experiment — Prequal vs Round Robin\n(Figure 6, section 5.1, Load is not what you should balance 2024)",
+experiment_label = "Dynamic Antagonist" if "DINAMIC" in results_dir or "dynamic" in results_dir.lower() else "Static Antagonist"
+fig.suptitle(f"Load Ramp Experiment — Prequal vs Round Robin ({experiment_label})\n(Figure 6, section 5.1, Load is not what you should balance 2024)",
              fontsize=13, fontweight="bold", y=0.98)
 
 load_ticks = sorted(df["load"].unique())
@@ -128,7 +135,7 @@ for _, row_rr in rr[rr["load"] >= 100].iterrows():
 
 plt.tight_layout(rect=[0, 0, 1, 0.96])
 
-out_path = "results-20260519-100906/figure6_comparison.png"
+out_path = f"{results_dir}/figure6_comparison.png"
 plt.savefig(out_path, dpi=150, bbox_inches="tight")
 print(f"Saved → {out_path}")
 plt.close()

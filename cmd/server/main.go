@@ -114,6 +114,19 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"healthy"}`))
 	})
+	mux.HandleFunc("/admin/algorithm", func(w http.ResponseWriter, r *http.Request) {
+		algo := r.URL.Query().Get("algo")
+		switch algo {
+		case "prequal":
+			lb.SetAlgorithm(loadbalancer.AlgorithmPrequal)
+		case "rr", "roundrobin":
+			lb.SetAlgorithm(loadbalancer.AlgorithmRoundRobin)
+		default:
+			http.Error(w, `algo must be "prequal" or "rr"`, http.StatusBadRequest)
+			return
+		}
+		fmt.Fprintf(w, "algorithm set to %s\n", algo)
+	})
 
 	server := &http.Server{
 		Addr:    ":" + *port,

@@ -193,8 +193,18 @@ func (lb *LoadBalancer) AddServer(server *Server) {
 // Replica selection
 // -----------------------------------------------------------------------------
 
+func (lb *LoadBalancer) SetAlgorithm(algo Algorithm) {
+	lb.mutex.Lock()
+	lb.config.Algorithm = algo
+	lb.mutex.Unlock()
+	lb.logger.Info("algorithm switched", slog.String("to", string(algo)))
+}
+
 func (lb *LoadBalancer) SelectServer() *Server {
-	if lb.config.Algorithm == AlgorithmRoundRobin {
+	lb.mutex.RLock()
+	algo := lb.config.Algorithm
+	lb.mutex.RUnlock()
+	if algo == AlgorithmRoundRobin {
 		return lb.selectServerRR()
 	}
 	return lb.selectServerPrequal()

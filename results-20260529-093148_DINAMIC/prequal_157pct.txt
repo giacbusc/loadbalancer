@@ -1,0 +1,47 @@
+
+Summary:
+  Total:	61.2037 secs
+  Slowest:	4.9680 secs
+  Fastest:	0.0011 secs
+  Average:	0.6973 secs
+  Requests/sec:	370.6310
+  
+  Total data:	2611784 bytes
+  Size/request:	115 bytes
+
+Response time histogram:
+  0.001 [1]	|
+  0.498 [11971]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  0.995 [4932]	|■■■■■■■■■■■■■■■■
+  1.491 [2959]	|■■■■■■■■■■
+  1.988 [1344]	|■■■■
+  2.485 [707]	|■■
+  2.981 [384]	|■
+  3.478 [195]	|■
+  3.975 [91]	|
+  4.471 [54]	|
+  4.968 [27]	|
+
+
+Latency distribution:
+  10% in 0.0604 secs
+  25% in 0.1683 secs
+  50% in 0.4549 secs
+  75% in 1.0017 secs
+  90% in 1.6556 secs
+  95% in 2.1700 secs
+  99% in 3.3076 secs
+
+Details (average, fastest, slowest):
+  DNS+dialup:	0.0001 secs, 0.0011 secs, 4.9680 secs
+  DNS-lookup:	0.0000 secs, 0.0000 secs, 0.0000 secs
+  req write:	0.0001 secs, 0.0000 secs, 0.0250 secs
+  resp wait:	0.6970 secs, 0.0011 secs, 4.9679 secs
+  resp read:	0.0001 secs, 0.0000 secs, 0.0100 secs
+
+Status code distribution:
+  [200]	22665 responses
+
+Error distribution:
+  [19]	Get "http://10.10.1.11:8080": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+
