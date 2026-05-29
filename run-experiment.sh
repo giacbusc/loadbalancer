@@ -89,8 +89,10 @@ trap cleanup EXIT INT TERM
 # ---------------------------------------------------------------------------
 echo "--- Saturation discovery (20s, uncapped, c=200, both LBs) ---"
 hey -z 20s -c 200 "$LB_PREQUAL" > "$RESULTS_DIR/saturation_prequal.txt" 2>&1 &
+PID_SAT_P=$!
 hey -z 20s -c 200 "$LB_RR"     > "$RESULTS_DIR/saturation_rr.txt"     2>&1 &
-wait
+PID_SAT_R=$!
+wait "$PID_SAT_P" "$PID_SAT_R"
 SAT=$(grep -E "^[[:space:]]*Requests/sec:" "$RESULTS_DIR/saturation_prequal.txt" | awk '{print $2}' | head -1)
 SAT_INT=${SAT%.*}
 echo "Measured saturation throughput (per LB, both running): ${SAT_INT} req/s"
