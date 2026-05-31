@@ -108,7 +108,7 @@ EOF
     docker rm -f backend 2>/dev/null || true
     docker run -d --name backend --restart=always \
         --network host \
-        --cpus 1 \
+        --cpus 2 \
         -e PORT=8080 \
         -e SERVER_ID="$(hostname)" \
         -e CPU_LOAD="$CPU_LOAD" \
