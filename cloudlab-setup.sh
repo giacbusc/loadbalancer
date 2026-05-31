@@ -96,7 +96,7 @@ EOF
         -e LB_QRIF=0.84 \
         -e LB_SELECTION_CHOICES=2 \
         -e LB_PROBE_INTERVAL=1s \
-        -e LB_USE_SERVER_RIF=false \
+        -e LB_USE_SERVER_RIF=true \
         -e BACKENDS="$BACKENDS" \
         loadbalancer:latest
     ;;

@@ -125,13 +125,18 @@ for i in "${!LEVELS[@]}"; do
     # Concurrency high enough to actually drive QPS even when the system
     # is slow under overload (otherwise hey self-throttles).
     # NOTE: hey's -q is per-worker, so divide total target QPS by concurrency.
-    CONC=300
+    CONC=1000
     QPS_PER_WORKER=$(awk -v q="$QPS" -v c="$CONC" 'BEGIN{printf "%.2f", q/c}')
 
-    hey -z "${DURATION}s" -q "$QPS_PER_WORKER" -c "$CONC" -t 1 "$LB_PREQUAL" \
+    # NB: niente "-t 1". Un timeout di 1s tronca la coda della distribuzione
+    # (p95/p99 leggono ~0.99s per entrambi) e gonfia il throughput, perché i
+    # worker abbandonano le richieste lente e ne sparano subito altre. È esatta-
+    # mente il segnale su cui Prequal vince (coda a 2-4s sotto overload) a venire
+    # cancellato. Default di hey = 20s, sufficiente.
+    hey -z "${DURATION}s" -q "$QPS_PER_WORKER" -c "$CONC" "$LB_PREQUAL" \
         > "$RESULTS_DIR/prequal_${NAME}.txt" 2>&1 &
     PID_P=$!
-    hey -z "${DURATION}s" -q "$QPS_PER_WORKER" -c "$CONC" -t 1 "$LB_RR" \
+    hey -z "${DURATION}s" -q "$QPS_PER_WORKER" -c "$CONC" "$LB_RR" \
         > "$RESULTS_DIR/rr_${NAME}.txt" 2>&1 &
     PID_R=$!
 
