@@ -69,23 +69,27 @@ SERVERS=(
 # Valori: s0  s1  s2  s3    s4  s5  s6    s7  s8  s9
 # ---------------------------------------------------------------------------
 
+# MINORANZA-CARICO: in ogni stato solo 2-3 server sono caldi (350=7 burner),
+# il resto è pulito (0). I caldi si SPOSTANO nel tempo, così RR continua a
+# colpirli mentre Prequal ha sempre 7-8 server liberi dove dirottare.
+# È lo scenario del paper: pochi antagonisti in mezzo a tante repliche sane.
 STATE_NAMES=(
-    "BASELINE — 4×350 + 3×300 + 3×150  (carico distribuito pesante)"
-    "SURGE    — 10×350                  (tutti al massimo assoluto)"
-    "SHIFT    — s0..3 clean, s4..6 max, s7..9 heavy (inversione netta)"
-    "RELIEF   — 3 server al massimo, il resto è clean"
-    "STORM    — carico alternato 350/300 su tutti e 10 i server"
-    "CALM     — 2 server pesanti, tutti gli altri clean"
+    "HEAD   — 3 caldi a inizio fila (s0,s1,s2), resto pulito"
+    "MID    — 3 caldi al centro (s3,s4,s5), resto pulito"
+    "TAIL   — 3 caldi in coda (s7,s8,s9), resto pulito"
+    "SPARSE — 3 caldi sparsi (s0,s4,s8), resto pulito"
+    "PAIR   — 2 caldi (s2,s3), resto pulito"
+    "PAIR2  — 2 caldi (s6,s7), resto pulito"
 )
 
-# 10 valori per riga: s0 s1 s2 s3  s4 s5 s6  s7 s8 s9
+# 10 valori per riga: s0 s1 s2 s3  s4 s5 s6  s7 s8 s9   (350=caldo, 0=pulito)
 STATES=(
-    "350 350 350 350  300 300 300  150 150 150"   # 1 BASELINE
-    "350 350 350 350  350 350 350  350 350 350"   # 2 SURGE    ← tutti al max
-    "  0   0   0   0  350 350 350  300 300 300"   # 3 SHIFT    ← inversione netta
-    "350 350 350   0    0   0   0    0   0   0"   # 4 RELIEF
-    "350 300 350 300  350 300 350  300 350 300"   # 5 STORM    ← caos su tutti
-    "350 350   0   0    0   0   0    0   0   0"   # 6 CALM
+    "350 350 350   0    0   0   0    0   0   0"   # 1 HEAD
+    "  0   0   0 350  350 350   0    0   0   0"   # 2 MID
+    "  0   0   0   0    0   0   0  350 350 350"   # 3 TAIL
+    "350   0   0   0  350   0   0    0 350   0"   # 4 SPARSE
+    "  0   0 350 350    0   0   0    0   0   0"   # 5 PAIR
+    "  0   0   0   0    0   0 350  350   0   0"   # 6 PAIR2
 )
 
 NUM_STATES=${#STATES[@]}

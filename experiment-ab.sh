@@ -46,9 +46,10 @@ LBS=("$LB1" "$LB2")
 BACKENDS=(10.10.1.21 10.10.1.22 10.10.1.23 10.10.1.24 10.10.1.25
           10.10.1.26 10.10.1.27 10.10.1.28 10.10.1.29 10.10.1.30)
 
-# Profilo STATICO eterogeneo: alcuni server pesanti, alcuni puliti, così Prequal
-# ha SEMPRE un target buono dove instradare. (cpu_load per s0..s9)
-STATIC_LOADS=(350 350 300 300 150 150 0 0 0 0)
+# Profilo STATICO minoranza-carico: solo 3 server pesanti (350), 7 puliti (0),
+# così Prequal ha sempre abbondante capacità dove dirottare. (cpu_load s0..s9)
+# È lo scenario del paper: pochi antagonisti in mezzo a tante repliche sane.
+STATIC_LOADS=(350 350 350 0 0 0 0 0 0 0)
 
 CONC=1000                          # connessioni per LB
 LEVELS=(0.75 0.83 0.93 1.03 1.14 1.27 1.41 1.57 1.74)
