@@ -68,6 +68,32 @@ ax1.plot(prequal["load"], prequal["p90_us"], color=COLOR_PREQUAL, lw=LW,     lin
 ax1.plot(prequal["load"], prequal["p99_us"], color=COLOR_PREQUAL, lw=LW+0.5, linestyle="-",
          label="Prequal p99", marker="^", markersize=6)
 
+# Annotate Prequal's p99 advantage (tail-latency reduction vs RR), placed in the
+# gap between the two p99 curves. On a log axis the geometric mean of the two
+# values is the visual midpoint, so the label sits cleanly between the lines.
+for load in load_ticks:
+    r = rr[rr["load"] == load]
+    p = prequal[prequal["load"] == load]
+    if r.empty or p.empty:
+        continue
+    rp99 = r["p99_us"].iloc[0]
+    pp99 = p["p99_us"].iloc[0]
+    reduction = (rp99 - pp99) / rp99 * 100
+    if reduction < 2:          # skip negligible/where they overlap
+        continue
+    y_mid = (rp99 * pp99) ** 0.5
+    ax1.annotate(f"-{reduction:.0f}%",
+                 xy=(load, y_mid), ha="center", va="center",
+                 fontsize=7.5, fontweight="bold", color="#2ca02c",
+                 bbox=dict(boxstyle="round,pad=0.15", fc="white",
+                           ec="#2ca02c", lw=0.6, alpha=0.9),
+                 zorder=5)
+
+# Legend hint for the green labels
+ax1.text(0.985, 0.02, "green = Prequal p99 reduction vs RR",
+         transform=ax1.transAxes, ha="right", va="bottom",
+         fontsize=7.5, color="#2ca02c", style="italic")
+
 # Shade "above allocation" region
 ax1.axvspan(100, max(load_ticks) + 5, color="lightyellow", alpha=0.6, zorder=0)
 ax1.axvline(x=100, color="gray", linestyle=":", lw=1.4, zorder=1)

@@ -1,0 +1,47 @@
+
+Summary:
+  Total:	61.5882 secs
+  Slowest:	2.9510 secs
+  Fastest:	0.0018 secs
+  Average:	0.5638 secs
+  Requests/sec:	654.5892
+  
+  Total data:	4640673 bytes
+  Size/request:	115 bytes
+
+Response time histogram:
+  0.002 [1]	|
+  0.297 [11322]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  0.592 [9905]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  0.887 [10655]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  1.181 [6950]	|■■■■■■■■■■■■■■■■■■■■■■■■■
+  1.476 [1358]	|■■■■■
+  1.771 [87]	|
+  2.066 [16]	|
+  2.361 [9]	|
+  2.656 [7]	|
+  2.951 [4]	|
+
+
+Latency distribution:
+  10% in 0.0830 secs
+  25% in 0.2570 secs
+  50% in 0.5614 secs
+  75% in 0.8419 secs
+  90% in 1.0152 secs
+  95% in 1.1217 secs
+  99% in 1.3720 secs
+
+Details (average, fastest, slowest):
+  DNS+dialup:	0.0038 secs, 0.0018 secs, 2.9510 secs
+  DNS-lookup:	0.0000 secs, 0.0000 secs, 0.0000 secs
+  req write:	0.0020 secs, 0.0000 secs, 0.1827 secs
+  resp wait:	0.5446 secs, 0.0013 secs, 2.9290 secs
+  resp read:	0.0007 secs, 0.0000 secs, 0.1816 secs
+
+Status code distribution:
+  [200]	40314 responses
+
+Error distribution:
+  [1]	Get "http://10.10.1.11:8080": dial tcp 10.10.1.11:8080: connect: connection refused
+
