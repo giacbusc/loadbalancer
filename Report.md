@@ -600,5 +600,69 @@ The core message of the paper is confirmed: **routing by RIF and latency yields 
 
 **Fix.** The dynamic A/B ramp runs `hey` **without** a `-t` timeout, letting every request complete and be recorded. This preserves the full tail and is what makes the 18–36 % p99 separation in Section 4.5.2 visible. The raw `hey` output for every step (e.g. `rr_174pct.txt` with a slowest response of 13.2 s) confirms that the long tail was captured rather than truncated.
 
+# 5. Further Exploration
+
+## Motivation: from the steady state to the time domain
+
+Every experiment in the paper — and every experiment of ours up to this point — measures the system **at equilibrium**: one operating point per load level, tail latency versus offered load. The paper never looks at the **time domain**: neither how fast each policy *reacts* to a sudden disturbance, nor how long it takes to *recover* once the disturbance ends.
+
+This matters because the paper itself, when discussing its central load-ramp result (Figure 6, §5.1), explicitly acknowledges a precondition for Prequal's advantage:
+
+> *"These results are possible only because many server replicas in our system are not fully allocated with antagonists […]. Prequal allows our job to shift load among replicas so as to fit into these cracks of temporary spare capacity."*
+
+In other words, Prequal's benefit rests on the existence of **spare capacity to divert toward**. The paper never stress-tests this precondition: its antagonists are always a *minority* of the fleet, and its analysis is steady-state. Our research question takes both gaps together:
+
+1. **Transient response.** Under a *correlated* shock that hits a large fraction of the fleet at once (unlike the paper's independent antagonists), how does each policy's tail latency *rise* and *recover* in time?
+2. **The "no-escape" regime.** As we increase the fraction of the fleet hit simultaneously, the cold majority that Prequal relies on shrinks. Where does Prequal's advantage break down?
+
+We take approach (1) from the project brief — *a variation of a test not present in the paper* — implemented entirely on top of our existing system, with no change to the load-balancer code.
+
+## 5.1. Methodology and Result
+
+### Experimental design
+
+We hold the offered load **constant** at 1.0× the (clean-fleet) saturation throughput and apply a **square-wave correlated shock**: every cycle, `NHOT` of the ten backends are driven to `cpu_load=350` simultaneously for `HOT` seconds (the shock), then returned to `cpu_load=0` for `COOL` seconds (recovery). This is a *correlated* disturbance — many machines degrading at the same instant — which the paper's independent antagonists never model. The shock is repeated for many cycles so that the transient can be recovered by **ensemble averaging** rather than read from a single noisy event.
+
+The run is a clean **two-pass A/B** (Section 4.1.3): one pass with the whole fleet on Prequal, one on Round-Robin, switching the algorithm at runtime; never both policies on the shared backends at once. The load generator is invoked with `hey -o csv`, which records **every request** with its latency and dispatch offset; a post-processing script (`plot_shock.py`) folds all cycles onto a common "time-since-shock" axis and computes per-0.5 s-bin percentiles. This per-request binning is essential: `hey`'s aggregate percentiles, averaged over the whole run, would smear the transient and hide it entirely.
+
+The representative run reported here used `NHOT=6`, 180 s per pass, with the deployed probe interval of 250 ms (`results-shock-20260623-021415_NHOT6/`). Correctness was checked on the raw data: both passes returned **100 % HTTP 200** (no truncated tails), the offered load was equal within 1.8 % (≈161 k vs ≈158 k requests), and the shock visibly raised the tail (p99 roughly doubled from the recovered baseline to the shock window in both passes). One measurement note: because the antagonist `curl` calls precede the `sleep` in the shock loop, the *actual* shock window lasted ≈9.7 s rather than the configured 8 s; the analysis uses the **measured** on-duration read back from the edge logs, so the figure is faithful to the shock actually applied.
+
+### Result
+
+<center>
+  <img
+    alt="Transient response to a correlated shock: RR's p99 spike is higher than Prequal's during the shock, while both recover at the same rate once the shock ends"
+    src="results-shock-20260623-021415_NHOT6/shock_response.png"
+    style="width:85%;"
+    />
+  <p>Figure 4: Transient response to a correlated shock (6/10 backends at <code>cpu_load=350</code>, constant 1.0× base load, ensemble-averaged over 8 cycles). The shaded region is the measured shock window. During the shock RR's p99 (red) sits above Prequal's (blue); after the shock both curves fall at the same rate.</p>
+</center>
+
+| Metric | Prequal | Round-Robin | RR / Prequal |
+|---|---|---|---|
+| **Peak p99** (during shock) | 3405 ms | 4344 ms | **1.28×** |
+| **Mean p99** (during shock) | 2964 ms | 3516 ms | **1.19×** |
+| Baseline p99 (end of recovery) | 1412 ms | 1634 ms | 1.16× |
+| Recovery time (to common threshold) | ≈1 s | ≈1 s | = |
+
+During the correlated shock, Prequal holds the tail roughly **20 % below** Round-Robin (peak 1.28×, mean 1.19×), and keeps a lower baseline even between shocks. The separation is real but modest — consistent with the very fresh 250 ms probing, which lets Prequal react so quickly that it barely allows a gap to open. As in the dynamic ramp (Section 4.5.2), Prequal's p50 is slightly *higher* than RR's: the familiar Hot-Cold-Lexicographic trade-off of a worse median for a much shorter tail.
+
+### Interpretation: prevention, not cure
+
+The striking feature of Figure 4 is that **the two policies recover at the same rate**, even though Prequal's spike is clearly lower. This is not a defect — it is the expected and correct behaviour, and it follows directly from what a load balancer can and cannot control:
+
+> A load balancer decides **where** requests go — the *distribution* of load — not the aggregate *service rate* of the fleet.
+
+The two phases of the cycle make this concrete. **During the shock** the fleet is *heterogeneous*: six throttled backends and four clean ones. Here the distribution is everything — Round-Robin keeps sending ≈60 % of traffic onto the throttled servers while the clean ones sit underused, so it wastes capacity and builds deep queues; Prequal diverts onto the clean servers, exploits their full capacity, and so keeps its queues — and its spike — lower. **After the shock** the fleet is *homogeneous* again: all ten backends are clean and identical. There is no longer any hotspot to avoid, so no routing policy can drain the accumulated backlog faster than any other — every backend offers the same service rate, and the drain is pure queueing physics, independent of the algorithm. (The connection-pool cap on `hey` also bounds the backlog similarly for both policies at the instant the shock lifts.)
+
+Hence the equal recovery *slope*, while the recovery *level* stays uniformly in Prequal's favour: it starts from a lower peak and remains at or below Round-Robin throughout the descent. The lesson is that **Prequal's value is prevention, not cure** — it keeps the queue from ever growing large, rather than draining it faster afterwards. This is exactly the paper's own framing, "direct load where capacity is available": during recovery, capacity is available *everywhere equally*, so there is nothing left to direct, and the advantage collapses to zero. It is worth noting that this clean separation is a property of our square-wave design, which fully resets the fleet to a homogeneous state; in a production setting where conditions keep shifting, recovery would overlap the next disturbance and Prequal's continuous re-routing would matter on the way down as well.
+
+### Planned extensions
+
+Two sweeps, runnable with the same harness, complete the study and are in progress:
+
+- **Signal-freshness sweep** (`LB_PROBE_INTERVAL` ∈ {250 ms, 1 s, 2 s}): we expect the transient separation to *widen* as the signal grows staler, because a slower-reacting Prequal lets the queue build before it diverts. This probes, in the time domain, the staleness effect that the paper's Figure 8 only examines at steady state.
+- **Fraction-of-fleet sweep** (`NHOT` ∈ {2, 4, 6, 8}): as the hot fraction grows, the cold majority disappears; we expect Prequal's advantage to fall toward zero — empirically locating the boundary of the "spare capacity" precondition that the paper states but never tests.
+
 
 

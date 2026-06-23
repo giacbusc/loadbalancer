@@ -1,0 +1,48 @@
+
+Summary:
+  Total:	181.1280 secs
+  Slowest:	6.6013 secs
+  Fastest:	0.0012 secs
+  Average:	0.6892 secs
+  Requests/sec:	894.2239
+  
+  Total data:	18621165 bytes
+  Size/request:	115 bytes
+
+Response time histogram:
+  0.001 [1]	|
+  0.661 [85184]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  1.321 [61492]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  1.981 [10513]	|■■■■■
+  2.641 [3251]	|■■
+  3.301 [936]	|
+  3.961 [277]	|
+  4.621 [68]	|
+  5.281 [18]	|
+  5.941 [6]	|
+  6.601 [4]	|
+
+
+Latency distribution:
+  10% in 0.1003 secs
+  25% in 0.2946 secs
+  50% in 0.6271 secs
+  75% in 0.9424 secs
+  90% in 1.2841 secs
+  95% in 1.6735 secs
+  99% in 2.5220 secs
+
+Details (average, fastest, slowest):
+  DNS+dialup:	0.0036 secs, 0.0012 secs, 6.6013 secs
+  DNS-lookup:	0.0000 secs, 0.0000 secs, 0.0000 secs
+  req write:	0.0016 secs, 0.0000 secs, 0.2146 secs
+  resp wait:	0.6748 secs, 0.0010 secs, 6.5536 secs
+  resp read:	0.0003 secs, 0.0000 secs, 0.2077 secs
+
+Status code distribution:
+  [200]	161750 responses
+
+Error distribution:
+  [1]	Get "http://10.10.1.12:8080": dial tcp 10.10.1.12:8080: connect: connection refused
+  [218]	Get "http://10.10.1.12:8080": dial tcp 10.10.1.12:8080: socket: too many open files
+

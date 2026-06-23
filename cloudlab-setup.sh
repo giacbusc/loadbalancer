@@ -84,8 +84,20 @@ EOF
     ALGO="prequal"
     [ "$ROLE" = "lb-rr" ] && ALGO="roundrobin"
 
+    # Parametri configurabili via env al (ri)avvio dello script. Esempio per lo
+    # sweep di freschezza, ri-eseguendo manualmente lo script su un nodo LB:
+    #   LB_PROBE_INTERVAL=1s LB_USE_SERVER_RIF=true \
+    #     sudo -E bash cloudlab-setup.sh lb-prequal <repo_url> <branch>
+    # (sudo -E preserva le variabili d'ambiente). Default = setup deployato.
+    PROBE_INTERVAL="${LB_PROBE_INTERVAL:-250ms}"
+    USE_SERVER_RIF="${LB_USE_SERVER_RIF:-false}"
+    QRIF="${LB_QRIF:-0.84}"
+    CHOICES="${LB_SELECTION_CHOICES:-2}"
+
     # All 10 backends, port 8080 each.
     BACKENDS="10.10.1.21:8080,10.10.1.22:8080,10.10.1.23:8080,10.10.1.24:8080,10.10.1.25:8080,10.10.1.26:8080,10.10.1.27:8080,10.10.1.28:8080,10.10.1.29:8080,10.10.1.30:8080"
+
+    echo "==> LB config: algo=$ALGO probe_interval=$PROBE_INTERVAL use_server_rif=$USE_SERVER_RIF qrif=$QRIF choices=$CHOICES"
 
     docker build -t loadbalancer:latest -f Dockerfile .
     docker rm -f lb 2>/dev/null || true
@@ -93,10 +105,10 @@ EOF
         --network host \
         -e LB_PORT=8080 \
         -e LB_ALGORITHM="$ALGO" \
-        -e LB_QRIF=0.84 \
-        -e LB_SELECTION_CHOICES=2 \
-        -e LB_PROBE_INTERVAL=250ms \
-        -e LB_USE_SERVER_RIF=false \
+        -e LB_QRIF="$QRIF" \
+        -e LB_SELECTION_CHOICES="$CHOICES" \
+        -e LB_PROBE_INTERVAL="$PROBE_INTERVAL" \
+        -e LB_USE_SERVER_RIF="$USE_SERVER_RIF" \
         -e BACKENDS="$BACKENDS" \
         loadbalancer:latest
     ;;
