@@ -35,6 +35,12 @@ type LoadBalancer struct {
 	// for the freshness sweep). The probing goroutine resets its ticker when
 	// this changes.
 	probeIntervalNs int64
+
+	// useServerRIF (0/1) selects the RIF source for HCL, mutable at runtime via
+	// SetUseServerRIF (/admin/use-server-rif): 1 = server-local RIF delivered by
+	// probes (probe-staleable, matches the paper), 0 = client-local RIF tracked
+	// in real time by this LB (always fresh). Initialised from Config.UseServerRIF.
+	useServerRIF int32
 }
 
 func NewLoadBalancer(config *Config, logger *slog.Logger) *LoadBalancer {
@@ -54,7 +60,7 @@ func NewLoadBalancer(config *Config, logger *slog.Logger) *LoadBalancer {
 	if config.QRIF == 0 {
 		config.QRIF = 0.84
 	}
-	return &LoadBalancer{
+	lb := &LoadBalancer{
 		servers:   make([]*Server, 0),
 		probePool: make(map[string]*ProbeResult),
 		config:    config,
@@ -62,6 +68,10 @@ func NewLoadBalancer(config *Config, logger *slog.Logger) *LoadBalancer {
 		logger:    logger,
 		metrics:   NewMetrics(),
 	}
+	if config.UseServerRIF {
+		lb.useServerRIF = 1
+	}
+	return lb
 }
 
 // -----------------------------------------------------------------------------
@@ -326,10 +336,25 @@ func (lb *LoadBalancer) selectServerPrequal() *Server {
 }
 
 func (lb *LoadBalancer) rifFor(s *Server) int32 {
-	if lb.config.UseServerRIF {
+	if atomic.LoadInt32(&lb.useServerRIF) == 1 {
 		return atomic.LoadInt32(&s.ServerRIF)
 	}
 	return atomic.LoadInt32(&s.RIF)
+}
+
+// SetUseServerRIF switches the RIF source for HCL at runtime (true = server-local
+// from probes, false = client-local real-time). Used by /admin/use-server-rif.
+func (lb *LoadBalancer) SetUseServerRIF(v bool) {
+	var n int32
+	if v {
+		n = 1
+	}
+	atomic.StoreInt32(&lb.useServerRIF, n)
+}
+
+// UseServerRIF reports the current RIF source (true = server-local).
+func (lb *LoadBalancer) UseServerRIF() bool {
+	return atomic.LoadInt32(&lb.useServerRIF) == 1
 }
 
 // selectBestCandidate applies the Hot-Cold Lexicographic (HCL) rule:

@@ -141,6 +141,21 @@ func main() {
 		lb.SetProbeInterval(d)
 		fmt.Fprintf(w, "probe interval set to %s\n", d)
 	})
+	mux.HandleFunc("/admin/use-server-rif", func(w http.ResponseWriter, r *http.Request) {
+		v := r.URL.Query().Get("v")
+		switch v {
+		case "": // GET current value (recorded by experiment-shock.sh)
+			fmt.Fprintf(w, "%t\n", lb.UseServerRIF())
+		case "true", "1":
+			lb.SetUseServerRIF(true)
+			fmt.Fprintf(w, "use_server_rif set to true\n")
+		case "false", "0":
+			lb.SetUseServerRIF(false)
+			fmt.Fprintf(w, "use_server_rif set to false\n")
+		default:
+			http.Error(w, `v must be "true" or "false"`, http.StatusBadRequest)
+		}
+	})
 
 	server := &http.Server{
 		Addr:    ":" + *port,

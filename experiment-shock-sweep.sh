@@ -36,12 +36,27 @@ echo "============================================="
 echo " NHOT: $NHOT | settle: ${SETTLE}s | shock: HOT=${HOT:-default} COOL=${COOL:-default}"
 echo
 
-# Verifica che l'endpoint runtime esista (build aggiornata dell'LB).
+# Verifica che gli endpoint runtime esistano (build aggiornata dell'LB).
 if ! curl -fsS "$LB1/admin/probe-interval" >/dev/null 2>&1; then
     echo "ERROR: $LB1 non espone /admin/probe-interval." >&2
-    echo "       Serve la build dell'LB con il campo runtime (balancer.go) + handler." >&2
+    echo "       Serve la build dell'LB con i campi runtime (balancer.go) + handler." >&2
     echo "       Re-instanzia o ricostruisci i container LB col codice aggiornato." >&2
     exit 1
+fi
+
+# Sorgente RIF per TUTTO lo sweep (true = server-local, fedele al paper e
+# stale-abile dal probe; false = client-local real-time). Default: true.
+USE_SERVER_RIF="${USE_SERVER_RIF:-true}"
+if curl -fsS "$LB1/admin/use-server-rif" >/dev/null 2>&1; then
+    for lb in "${LBS[@]}"; do
+        curl -fsS "${lb}/admin/use-server-rif?v=${USE_SERVER_RIF}" >/dev/null \
+            || { echo "ERROR: impossibile impostare use-server-rif su $lb" >&2; exit 1; }
+    done
+    echo "use_server_rif impostato a '$USE_SERVER_RIF' su tutti gli LB"
+    echo
+else
+    echo "ATTENZIONE: /admin/use-server-rif non disponibile (build vecchia)." >&2
+    echo "            Il valore resta quello di boot; verifica che sia '$USE_SERVER_RIF'." >&2
 fi
 
 RESULT_DIRS=()

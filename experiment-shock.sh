@@ -98,9 +98,13 @@ echo "Entrambi gli LB raggiungibili."
 # Se l'LB è una build vecchia senza endpoint, ripiega su "unknown".
 PROBE_IV=$(curl -fsS "$LB1/admin/probe-interval" 2>/dev/null | tr -d '[:space:]')
 [ -z "$PROBE_IV" ] && PROBE_IV="unknown"
-NEW_DIR="${RESULTS_DIR}_PI${PROBE_IV}"
+# Sorgente RIF attiva: true = server-local (probe, stale-abile), false = client-local (real-time).
+RIF_SRC=$(curl -fsS "$LB1/admin/use-server-rif" 2>/dev/null | tr -d '[:space:]')
+[ -z "$RIF_SRC" ] && RIF_SRC="unknown"
+RIF_TAG="srv"; [ "$RIF_SRC" = "false" ] && RIF_TAG="loc"
+NEW_DIR="${RESULTS_DIR}_PI${PROBE_IV}_RIF${RIF_TAG}"
 mv "$RESULTS_DIR" "$NEW_DIR" && RESULTS_DIR="$NEW_DIR"
-echo "Probe interval attivo sull'LB: ${PROBE_IV}"
+echo "Probe interval attivo: ${PROBE_IV} | use_server_rif: ${RIF_SRC}"
 echo "Results dir: $RESULTS_DIR"
 echo
 
@@ -195,6 +199,7 @@ qps=$QPS
 shock_load=$SHOCK_LOAD
 ncycles=$NCYCLES
 probe_interval=$PROBE_IV
+use_server_rif=$RIF_SRC
 EOF
 
 # ---------------------------------------------------------------------------
