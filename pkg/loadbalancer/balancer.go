@@ -29,6 +29,12 @@ type LoadBalancer struct {
 	// probes as hot or cold. This matches the paper's definition: "an
 	// estimate of the distribution of RIF across replicas".
 	currentRIFThreshold int32
+
+	// probeIntervalNs is the current probing period in nanoseconds, mutable at
+	// runtime via SetProbeInterval (used by the /admin/probe-interval endpoint
+	// for the freshness sweep). The probing goroutine resets its ticker when
+	// this changes.
+	probeIntervalNs int64
 }
 
 func NewLoadBalancer(config *Config, logger *slog.Logger) *LoadBalancer {
@@ -63,14 +69,38 @@ func NewLoadBalancer(config *Config, logger *slog.Logger) *LoadBalancer {
 // -----------------------------------------------------------------------------
 
 func (lb *LoadBalancer) StartProbing() {
+	atomic.StoreInt64(&lb.probeIntervalNs, int64(lb.config.ProbeInterval))
 	go func() {
 		ticker := time.NewTicker(lb.config.ProbeInterval)
 		defer ticker.Stop()
+		cur := int64(lb.config.ProbeInterval)
 		for range ticker.C {
 			lb.probeAllServers()
 			lb.recomputeGlobalThreshold()
+			// Apply a runtime change to the probing period, if any.
+			if n := atomic.LoadInt64(&lb.probeIntervalNs); n > 0 && n != cur {
+				cur = n
+				ticker.Reset(time.Duration(n))
+			}
 		}
 	}()
+}
+
+// SetProbeInterval changes the probing period at runtime. The new value takes
+// effect on the next tick (so a switch from a long to a short interval waits up
+// to the old period once). Ignored if d <= 0.
+func (lb *LoadBalancer) SetProbeInterval(d time.Duration) {
+	if d > 0 {
+		atomic.StoreInt64(&lb.probeIntervalNs, int64(d))
+	}
+}
+
+// ProbeInterval returns the current (possibly runtime-overridden) probing period.
+func (lb *LoadBalancer) ProbeInterval() time.Duration {
+	if n := atomic.LoadInt64(&lb.probeIntervalNs); n > 0 {
+		return time.Duration(n)
+	}
+	return lb.config.ProbeInterval
 }
 
 func (lb *LoadBalancer) probeAllServers() {

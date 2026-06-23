@@ -127,6 +127,20 @@ func main() {
 		}
 		fmt.Fprintf(w, "algorithm set to %s\n", algo)
 	})
+	mux.HandleFunc("/admin/probe-interval", func(w http.ResponseWriter, r *http.Request) {
+		v := r.URL.Query().Get("d")
+		if v == "" { // GET current value (used by experiment-shock.sh to record it)
+			fmt.Fprintf(w, "%s\n", lb.ProbeInterval())
+			return
+		}
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			http.Error(w, `d must be a positive Go duration, e.g. "250ms", "1s", "2s"`, http.StatusBadRequest)
+			return
+		}
+		lb.SetProbeInterval(d)
+		fmt.Fprintf(w, "probe interval set to %s\n", d)
+	})
 
 	server := &http.Server{
 		Addr:    ":" + *port,

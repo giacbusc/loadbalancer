@@ -26,26 +26,27 @@
 #     via /admin/algorithm a runtime: stesso schedule di shock, cambia solo l'algo.
 #
 # Usage: ./experiment-shock.sh [duration_per_pass] [nhot]
-#   ./experiment-shock.sh                 # 180s/passata, 6 backend colpiti
-#   ./experiment-shock.sh 180 4           # 180s/passata, 4 backend colpiti
+#   ./experiment-shock.sh                 # 108s/passata (8 cicli), 6 backend colpiti
+#   ./experiment-shock.sh 108 4           # 108s/passata, 4 backend colpiti
 #   NHOT sweep (regime "no escape"):
-#   for n in 2 4 6 8; do ./experiment-shock.sh 180 $n; done
+#   for n in 2 4 6 8; do ./experiment-shock.sh 108 $n; done
+#   Shock lungo (vecchio default): HOT=8 COOL=12 ./experiment-shock.sh 180 6
 #
 # Variabili d'ambiente (override opzionale):
 #   BASE_LEVEL  carico costante in frazione di saturazione        (default 1.00)
-#   HOT         secondi di shock ON                               (default 8)
-#   COOL        secondi di recupero OFF                           (default 12)
-#   WARMUP      secondi prima del primo shock                     (default 12)
+#   HOT         secondi di shock ON  (shock corto per isolare il lag)  (default 3)
+#   COOL        secondi di recupero OFF                            (default 9)
+#   WARMUP      secondi prima del primo shock                      (default 12)
 #   SHOCK_LOAD  cpu_load applicato ai backend colpiti             (default 350)
 #   CONC        connessioni per LB                                (default 1000)
 
 set -uo pipefail
 
-DURATION="${1:-180}"
+DURATION="${1:-108}"
 NHOT="${2:-6}"
 BASE_LEVEL="${BASE_LEVEL:-1.00}"
-HOT="${HOT:-8}"
-COOL="${COOL:-12}"
+HOT="${HOT:-3}"
+COOL="${COOL:-9}"
 WARMUP="${WARMUP:-12}"
 SHOCK_LOAD="${SHOCK_LOAD:-350}"
 CONC="${CONC:-1000}"
@@ -91,6 +92,16 @@ for lb in "${LBS[@]}"; do
     fi
 done
 echo "Entrambi gli LB raggiungibili."
+
+# Probe interval ATTIVO letto dall'LB (GET /admin/probe-interval), così la
+# cartella e meta.env sono auto-documentanti per lo sweep di freschezza.
+# Se l'LB è una build vecchia senza endpoint, ripiega su "unknown".
+PROBE_IV=$(curl -fsS "$LB1/admin/probe-interval" 2>/dev/null | tr -d '[:space:]')
+[ -z "$PROBE_IV" ] && PROBE_IV="unknown"
+NEW_DIR="${RESULTS_DIR}_PI${PROBE_IV}"
+mv "$RESULTS_DIR" "$NEW_DIR" && RESULTS_DIR="$NEW_DIR"
+echo "Probe interval attivo sull'LB: ${PROBE_IV}"
+echo "Results dir: $RESULTS_DIR"
 echo
 
 # ---------------------------------------------------------------------------
@@ -183,6 +194,7 @@ sat=$SAT_INT
 qps=$QPS
 shock_load=$SHOCK_LOAD
 ncycles=$NCYCLES
+probe_interval=$PROBE_IV
 EOF
 
 # ---------------------------------------------------------------------------
