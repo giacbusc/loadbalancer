@@ -268,10 +268,11 @@ run_pass rr
 # ---------------------------------------------------------------------------
 echo "============================================="
 echo "Esperimento shock completo. Risultati in: $RESULTS_DIR"
-if command -v python3 >/dev/null && [ -f "$SCRIPT_DIR/plot_shock.py" ]; then
+PLOT_SHOCK="$SCRIPT_DIR/../analysis/plot_shock.py"
+if command -v python3 >/dev/null && [ -f "$PLOT_SHOCK" ]; then
     echo "--- plot_shock.py ---"
-    python3 "$SCRIPT_DIR/plot_shock.py" "$RESULTS_DIR" || true
+    python3 "$PLOT_SHOCK" "$RESULTS_DIR" || true
 else
-    echo "Plotta con: python3 plot_shock.py $RESULTS_DIR"
+    echo "Plotta con: python3 analysis/plot_shock.py $RESULTS_DIR"
 fi
 echo "============================================="

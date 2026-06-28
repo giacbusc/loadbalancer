@@ -596,6 +596,80 @@ The gap between the two policies was suspiciously small and unstable from run to
 **Root cause.** Under overload the distinguishing part of the latency distribution lives at 2–4 s. A client timeout cuts every request that exceeds it and re-counts it as a failure, which removes exactly the slow requests on which Round-Robin and Prequal differ and flattens the measured tail (and inflates the apparent throughput symmetrically).
 
 **Fix.** The dynamic A/B ramp runs `hey` **without** a `-t` timeout, letting every request complete and be recorded. This preserves the full tail and is what makes the 18–36 % p99 separation in Section 4.5.2 visible..
+
+# 5. Further Exploration
+
+## Which approach we took and why
+
+We chose **approach 1**: a variation of the test that is *not present in the paper*. Every experiment in the paper — and every result of ours in Section 4 — measures the system **at steady state**: one equilibrium tail-latency value for each load level. The paper never looks at the **time domain**. Two questions follow naturally and are left completely unanswered:
+
+1. **How fast does each policy *react*** when capacity suddenly disappears?
+2. **How long does each policy take to *recover*** once capacity returns?
+
+There is also a structural assumption baked into the paper's whole argument: that a *"cold majority"* of replicas always exists for Prequal to divert toward. We stress exactly that assumption by hitting **6 of the 10 backends simultaneously** with a single **correlated shock** — not the independent, scattered antagonists of Section 4, but one event that removes the majority of the capacity at once.
+
+**Motivation and importance.** Prequal's entire thesis is that routing on *fresh* RIF and latency signals lets it track a *shifting* capacity landscape that a load-blind policy cannot see. A steady-state load ramp can never exhibit that tracking, because nothing moves within a step. In production, however, capacity shocks (an antagonist bursting above its allocation) are inherently *transient*. The interesting and unmeasured behaviour — reaction speed, recovery time, and what happens when the cold majority shrinks — lives precisely in the transient. This is the gap our experiment targets.
+
+## 5.1 Methodology and Result
+
+### How the experiment was conducted
+
+The driver is [`experiments/experiment-shock.sh`](https://github.com/giacbusc/loadbalancer/blob/main/experiments/experiment-shock.sh), built on the same clean A/B machinery as `experiment-ab.sh`:
+
+* **Constant base load.** Saturation is discovered once on Round-Robin (a single 20 s uncapped `hey -c 200` burst → **935 req/s per LB**), and the whole run is then driven at a *constant* `1.00×` of that reference. Unlike the Section 4 ramp, load does **not** change during the run — the only thing that moves is the antagonist, so the transient we measure is attributable to the shock alone.
+* **Square-wave correlated shock.** After a 12 s warm-up, the **first 6 of the 10 backends** are driven to `cpu_load=350` (7 burner goroutines, saturating 7 of 8 cores) for a `HOT` window, then returned to clean for a `COOL` window, repeated for **8 cycles** (period = 12 s). The configured `HOT=3 s` becomes **≈4.3 s** in practice because the parallel `curl /admin/load` calls add overhead; the plotter measures the *real* ON duration from the edge logs and uses it. The same 6 backends are hit every cycle — this is a *correlated* shock, the regime the paper never tests.
+* **Clean two-pass A/B.** As in Section 4.1.3, one pass runs the whole fleet on Prequal, a second pass on Round-Robin, switching at runtime via `/admin/algorithm`. Both passes see the identical shock schedule and base load; only the algorithm differs.
+* **Per-request capture + ensemble averaging.** `hey` is launched with `-o csv`, recording `(response-time, offset)` for *every* request. [`analysis/plot_shock.py`](https://github.com/giacbusc/loadbalancer/blob/main/analysis/plot_shock.py) then **folds** all 8 shock cycles onto the shock-onset instant and aggregates p99 in 0.5 s bins. This is the step that makes the measurement trustworthy: a single shock event is far too noisy on the tail, but **ensemble-averaging 8 identical cycles** yields a clean `p99(t)` curve. The probe interval (250 ms) is well below the queue-drain timescale (2–4 s), so the 0.5 s binning resolves the transient cleanly. Recovery is measured against a **common absolute threshold** (+20 % of the worse of the two recovered baselines), so a policy with a higher baseline cannot appear to "recover sooner" merely by comparing against itself.
+
+The run reported here used `NHOT=6`, `base_level=1.00`, `shock_load=350`, `period=12 s` (HOT≈4.3 s real / COOL≈7.7 s), 8 cycles.
+
+### Result
+
+<center>
+  <img
+    alt="Transient response to a correlated shock: Prequal's p99 peaks lower than Round-Robin's during the shock and recovers about 2 s faster afterwards"
+    src="results/results-shock-20260623-044011_NHOT6_PI250ms/shock_response.png"
+    style="width:85%;"
+    />
+  <p>Figure 4: Transient response to a correlated shock (6/10 backends, constant 1.00× load). Ensemble-averaged p99(t) over 8 shock cycles; the shaded band is the shock-ON window. <i>(Generated file: <code>results/results-shock-20260623-044011_NHOT6_PI250ms/shock_response.png</code> — upload to HackMD like the other figures.)</i></p>
+</center>
+
+| Metric (over the shock-ON window) | Prequal | Round-Robin | RR / Prequal |
+|---|---|---|---|
+| Recovered baseline p99 | 1802 ms | 1740 ms | — |
+| **Peak p99** during shock | **3046 ms** | 3725 ms | **1.22×** |
+| **Mean p99** during shock | **2606 ms** | 3152 ms | **1.21×** |
+| Recovery time to common threshold | **≈0 s** | ≈2 s | — |
+
+### What we discovered
+
+* **The advantage is concentrated in the transient.** Below shock and after recovery the two policies sit at the same baseline (~1.7–1.8 s p99). The separation opens *only* while the shock is active: Prequal's p99 peaks **22 % lower** than Round-Robin's and averages **21 % lower** across the ON window. This is the exact mechanism the paper claims but never visualises — and it is invisible to a steady-state ramp.
+* **Faster recovery.** Once capacity returns, Prequal is already below the common recovery threshold by the first post-shock bin, whereas Round-Robin needs **≈2 s** more to drain the queues it kept feeding into the hot backends during the shock.
+* **The cold majority does not have to be large.** Even with **60 % of the fleet knocked out simultaneously**, the 4 remaining cold backends are enough for HCL to keep the tail materially lower and to recover faster. Prequal degrades gracefully rather than collapsing, consistent with the paper's overload behaviour, and extends it into a regime (correlated, majority shock) the paper does not study.
+
+### Signal-freshness sweep: the advantage is robust to probe rate
+
+We then asked a second, deployment-relevant question: **how much does Prequal's transient advantage depend on how often it probes?** We re-ran the identical shock at three probe intervals — **250 ms, 1 s and 2 s** — with [`experiments/experiment-shock-sweep.sh`](https://github.com/giacbusc/loadbalancer/blob/main/experiments/experiment-shock-sweep.sh), which changes the interval at runtime via `/admin/probe-interval` so every point sees the same shock and differs *only* in probe rate.
+
+This sweep was run with **`use_server_rif=false`**, i.e. **client-local RIF**: the dominant load signal of HCL is kept *in real time* by the load balancer on every dispatch and completion ([`pkg/loadbalancer/balancer.go`](https://github.com/giacbusc/loadbalancer/blob/main/pkg/loadbalancer/balancer.go), `rifOf`). This is the more reactive and faithful configuration — the RIF count never goes stale, so the probe interval governs only the *latency* signal and the RIF-threshold quantile. The sweep therefore cleanly isolates **how much the advantage rests on the RIF signal alone**: if relaxing the probe rate does not erode the benefit, then Prequal does not need frequent probing to work.
+
+<center>
+  <img
+    alt="Probe-interval sweep: Prequal's RR/Prequal p99 ratio stays in a 1.12-1.31x band across 250ms, 1s and 2s probe intervals, never collapsing toward 1.0"
+    src="results/results-shock-FRESHNESS-SWEEP.png"
+    style="width:85%;"
+    />
+  <p>Figure 5: Prequal's transient tail advantage (RR/Prequal p99, peak and mean over the shock window) as a function of probe interval, with client-local real-time RIF. The advantage holds across an 8× change in probe rate.</p>
+</center>
+
+| Probe interval | Peak p99 RR/Prequal | Mean p99 RR/Prequal |
+|---|---|---|
+| 250 ms | 1.22× | 1.21× |
+| 1 s | 1.12× | 1.31× |
+| 2 s | 1.14× | 1.24× |
+
+**What we discovered.** Across an **8× increase in probe interval** (250 ms → 2 s), Prequal's tail advantage **never collapses toward 1.0**: it stays in a **1.12×–1.31× band** on both peak and mean p99. Because the RIF signal is maintained in real time client-side, slowing the probe loop only stales the latency signal — and that alone is *not* enough to erode the transient benefit. The practical consequence is significant: in this configuration the **probing overhead can be cut several-fold without sacrificing Prequal's overload protection**, which is exactly the kind of cost/benefit trade-off the paper raises (it motivates its asynchronous probe pool precisely to keep probing cheap) but never quantifies against signal freshness. The corrected, auto-documenting plotter for this sweep is [`analysis/plot_freshness_sweep.py`](https://github.com/giacbusc/loadbalancer/blob/main/analysis/plot_freshness_sweep.py).
+
 ## 6. Reproducibility Assessment of the Paper
 
 ### 6.1 Was the methodology clearly described?
