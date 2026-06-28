@@ -21,7 +21,7 @@ Guida operativa per lanciare i tre esperimenti sul cluster CloudLab:
    ```
 
 ### 0.2 Aggiornare il codice sui nodi
-Gli script nuovi (`experiment-shock.sh`, `plot_shock.py`, `set-probe-interval.sh`) devono trovarsi sui nodi. Dopo aver fatto commit+push:
+Gli script nuovi (`experiments/experiment-shock.sh`, `analysis/plot_shock.py`, `set-probe-interval.sh`) devono trovarsi sui nodi. Dopo aver fatto commit+push:
 ```bash
 # dalla tua macchina locale
 ./deploy.sh            # git pull + restart container su tutti i nodi
@@ -54,18 +54,18 @@ ssh <user>@loadgen-0.<...>.cloudlab.us
 cd /opt/loadbalancer
 
 # load-ramp statico, 60s per livello (9 livelli, 0.60×→1.80× saturazione)
-./run-experiment.sh 60
+./experiments/run-experiment.sh 60
 
 # estrai il CSV riassuntivo (sostituisci con la cartella stampata a fine run)
-./parse-results.sh /tmp/results-YYYYMMDD-HHMMSS
+./experiments/parse-results.sh /tmp/results-YYYYMMDD-HHMMSS
 
 # genera la figura a due pannelli (tail latency log + throughput)
-python3 plot_results.py /tmp/results-YYYYMMDD-HHMMSS
+python3 analysis/plot_results.py /tmp/results-YYYYMMDD-HHMMSS
 ```
 
 Output: `summary.csv` e `figure6_comparison.png` nella cartella `/tmp/results-...`.
 
-> **Nota antagonista**: in modalità statica i carichi CPU dei backend sono quelli impostati al boot da `profile.py`/`cloudlab-setup.sh` (heavy=350, light=150, clean=0). Per controllarli prima del run: `./watch-backends.sh`.
+> **Nota antagonista**: in modalità statica i carichi CPU dei backend sono quelli impostati al boot da `profile.py`/`cloudlab-setup.sh` (heavy=350, light=150, clean=0). Per controllarli prima del run: `./experiments/watch-backends.sh`.
 
 ---
 
@@ -84,9 +84,9 @@ USE_SERVER_RIF=true ./set-probe-interval.sh 250ms
 In due terminali su `loadgen-0`:
 ```bash
 # terminale 1
-./dynamic-antagonist.sh
+./experiments/dynamic-antagonist.sh
 # terminale 2 — guarda i 2-3 caldi spostarsi
-./watch-backends.sh
+./experiments/watch-backends.sh
 # poi ferma il terminale 1 (Ctrl+C) prima di lanciare l'esperimento
 ```
 
@@ -95,16 +95,16 @@ In due terminali su `loadgen-0`:
 cd /opt/loadbalancer
 
 # A/B dinamico, 60s per livello (il ciclo antagonista riparte da solo)
-./experiment-ab.sh 60 dynamic
+./experiments/experiment-ab.sh 60 dynamic
 
 # parse + plot (la cartella è /tmp/results-ab-...)
-./parse-results.sh /tmp/results-ab-YYYYMMDD-HHMMSS
-python3 plot_results.py /tmp/results-ab-YYYYMMDD-HHMMSS
+./experiments/parse-results.sh /tmp/results-ab-YYYYMMDD-HHMMSS
+python3 analysis/plot_results.py /tmp/results-ab-YYYYMMDD-HHMMSS
 ```
 
 Output: `summary.csv` e `figure6_comparison.png` (LB canonico = `.11`; l'output di `.12` finisce in `_lb2/` ed è ignorato dal parser).
 
-> Per la variante **statica A/B** (stesso harness a due passate, antagonista a tre gruppi): `./experiment-ab.sh 60 static`.
+> Per la variante **statica A/B** (stesso harness a due passate, antagonista a tre gruppi): `./experiments/experiment-ab.sh 60 static`.
 
 ---
 
@@ -118,9 +118,9 @@ ssh <user>@loadgen-0.<...>.cloudlab.us
 cd /opt/loadbalancer
 
 # 180s per passata, 6/10 backend colpiti per shock (default HOT=8s, COOL=12s)
-./experiment-shock.sh 180 6
+./experiments/experiment-shock.sh 180 6
 ```
-Lo script fa già parse interno e chiama `plot_shock.py` a fine run. Output nella cartella `/tmp/results-shock-..._NHOT6/`:
+Lo script fa già parse interno e chiama `analysis/plot_shock.py` a fine run. Output nella cartella `/tmp/results-shock-..._NHOT6/`:
 - `prequal.csv`, `rr.csv` — latenza per-richiesta
 - `*_edges.log` — istanti dei fronti shock ON/OFF
 - `shock_response.png` — curva p99(t) Prequal vs RR con picco e tempo di recupero
@@ -129,7 +129,7 @@ Lo script fa già parse interno e chiama `plot_shock.py` a fine run. Output nell
 Trova il punto in cui sparisce la maggioranza fredda e il vantaggio di Prequal svanisce:
 ```bash
 for n in 2 4 6 8; do
-  ./experiment-shock.sh 180 $n
+  ./experiments/experiment-shock.sh 180 $n
 done
 ```
 Ogni run stampa a console `picco p99` e `recupero` per entrambe le policy → tabula al variare di `NHOT` per la curva "vantaggio vs frazione calda".
@@ -139,7 +139,7 @@ Il probe interval è fissato al boot (`LB_PROBE_INTERVAL`, [cloudlab-setup.sh:98
 ```bash
 for iv in 250ms 1s 2s; do
   ./set-probe-interval.sh "$iv"     # ricrea lb su .11 e .12, attende healthy
-  ./experiment-shock.sh 180 6
+  ./experiments/experiment-shock.sh 180 6
 done
 ```
 Verifica il valore attivo:
@@ -157,7 +157,7 @@ ssh 10.10.1.11 "sudo docker logs lb 2>&1 | grep -i probe_interval"
 | Warmup prima del 1° shock | `WARMUP=` | 12 s |
 | Intensità antagonista | `SHOCK_LOAD=` | 350 |
 
-Esempio: `BASE_LEVEL=1.10 HOT=6 COOL=14 ./experiment-shock.sh 240 6`
+Esempio: `BASE_LEVEL=1.10 HOT=6 COOL=14 ./experiments/experiment-shock.sh 240 6`
 
 > Se l'ensemble è rumoroso (pochi cicli), aumenta la durata: con `HOT=8/COOL=12` servono ~180-240 s per 8-11 cicli.
 
@@ -170,8 +170,8 @@ scp -r <user>@loadgen-0.<...>.cloudlab.us:/tmp/results-shock-*_NHOT6 .
 ```
 Se `plot_*.py` non gira sul nodo (mancano pandas/matplotlib), copia i risultati e plotta in locale (qui c'è `.venv-plot/`):
 ```bash
-.venv-plot/bin/python plot_shock.py ./results-shock-..._NHOT6
-.venv-plot/bin/python plot_results.py ./results-ab-...
+.venv-plot/bin/python analysis/plot_shock.py ./results-shock-..._NHOT6
+.venv-plot/bin/python analysis/plot_results.py ./results-ab-...
 ```
 
 ---

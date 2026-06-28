@@ -133,14 +133,17 @@ loadbalancer/
 ├── cloudlab-setup.sh               # Per-role startup script
 ├── setup.sh                        # Local/environment setup helper
 ├── deploy.sh                       # Build + deploy containers
-├── run-experiment.sh               # Static load-ramp experiment (preliminary)
-├── experiment-ab.sh                # Main dynamic two-pass A/B experiment
-├── dynamic-antagonist.sh           # Moving-antagonist scheduler (6 states)
-├── experiment-rif-source.sh**        # Secondary RIF-source experiment
-├── compare.sh                      # Compare two result runs
-├── parse-results.sh                # Parse hey output into a CSV summary
-├── plot_results.py                 # Generate the two-panel Figure 6 plot
-├── watch-backends.sh               # Live backend health/RIF monitor
+├── experiments/                    # Experiment-running scripts
+│   ├── run-experiment.sh           # Static load-ramp experiment (preliminary)
+│   ├── experiment-ab.sh            # Main dynamic two-pass A/B experiment
+│   ├── experiment-shock-sweep.sh   # Correlated-shock probe-freshness sweep (§5)
+│   ├── dynamic-antagonist.sh       # Moving-antagonist scheduler (6 states)
+│   ├── parse-results.sh            # Parse hey output into a CSV summary
+│   └── watch-backends.sh           # Live backend health/RIF monitor
+├── analysis/                       # Python plotting / analysis scripts
+│   ├── plot_results.py             # Generate the two-panel Figure 6 plot
+│   └── plot_shock.py               # Shock p99(t) ensemble-averaged plot (§5)
+├── results/                        # Saved outputs (results-<type>-DATE_info)
 ├── tests/unit/balancer_test.go     # Unit tests for the HCL selection rule
 ├── config/
 │   ├── prometheus/prometheus.yml   # Prometheus scrape config
@@ -296,7 +299,7 @@ These choices are documented here rather than buried in code, so that any future
 
 ---
 
-This setup is what is exercised by the experiments reported in the following section. All configuration files (`profile.py`, `cloudlab-setup.sh`, `Dockerfile`, `backend/Dockerfile`, `docker-compose.yml`) and the two scripts (`run-experiment.sh`, `experiment-ab.sh`) are tracked in the repository at the commit hash referenced above, so a reader can clone, instantiate the CloudLab profile, and obtain the same environment without manual intervention.
+This setup is what is exercised by the experiments reported in the following section. All configuration files (`profile.py`, `cloudlab-setup.sh`, `Dockerfile`, `backend/Dockerfile`, `docker-compose.yml`) and the two scripts (`experiments/run-experiment.sh`, `experiments/experiment-ab.sh`) are tracked in the repository at the commit hash referenced above, so a reader can clone, instantiate the CloudLab profile, and obtain the same environment without manual intervention.
 
 
 
@@ -328,7 +331,7 @@ The static experiment was launched by running:
 
 ```bash
 cd /opt/loadbalancer
-./run-experiment.sh 60
+./experiments/run-experiment.sh 60
 ```
 
 The script executes in three phases.
@@ -347,7 +350,7 @@ hey -z 60s -q <qps_per_worker> -c 300 -t 20 http://10.10.1.12:8080   # RR
 **Phase 3 — Result extraction.** After all nine steps completed, `parse-results.sh` extracted a structured CSV from the raw `hey` output files:
 
 ```bash
-./parse-results.sh /tmp/results-********-******
+./experiments/parse-results.sh /tmp/results-********-******
 ```
 
 The CSV contains, per algorithm and per load level: achieved QPS, total requests served, latency percentiles p50/p90/p95/p99 in microseconds, and error count. The data were then visualized with `plot_results.py`, which generates a two-panel figure (tail latency on log scale + throughput as a bar chart) analogous to Figure 6 of the paper.
@@ -360,7 +363,7 @@ The dynamic-antagonist variant is the part of the experiment that was redesigned
 Manca un comando sudo ... prima di lanciare l'esperimento
 
 ```bash
-./experiment-ab.sh 60 dynamic
+./experiments/experiment-ab.sh 60 dynamic
 ```
 
 #### Why a two-pass A/B procedure
@@ -475,7 +478,7 @@ The sharp p90 jump from ~850 ms at 90 % to ~1500–1800 ms at 100 % marks the on
 * **p90 latency advantage**: −11.8 % to −19.5 %, **average −17.4 %**. Prequal's p90 hovers around 1500–1700 ms throughout overload; RR's p90 climbs steadily from 1749 ms to 1969 ms. This is the most consistent and numerically largest signal in the static run.
 * **p99 latency advantage**: −4.9 % to −14.1 %, **average −9.8 %**.
 
-The generated figure is `results-20260519-100906_STATIC/figure6_comparison.png`, reproduced below.
+The generated figure is `results/results-static-20260519-100906/figure6_comparison.png`, reproduced below.
 
 <center>
   <img
@@ -514,7 +517,7 @@ The dynamic A/B result set is summarized below. Latencies are in milliseconds; Q
 
 **The HCL median trade-off.** A striking feature of the dynamic data is that Prequal's **p50 is consistently higher** than RR's (e.g. 737 ms vs 599 ms at 174 %). This is not a defect: it is the Hot-Cold Lexicographic rule behaving as designed. By always preferring the lowest-latency *cold* server, Prequal deliberately accepts a slightly worse median in exchange for a much shorter tail. RR's lower median comes from occasionally hitting a fast clean server by luck on its rotation, but it pays for that luck with a long tail whenever the rotation lands on a hot one. Optimising the tail rather than the median is exactly the objective the paper sets for Prequal.
 
-The generated figure is `results-ab-20260531-094836_DINAMIC/figure6_comparison.png`, reproduced below.
+The generated figure is `results/results-ab-20260531-094836_DINAMIC/figure6_comparison.png`, reproduced below.
 
 <center>
   <img

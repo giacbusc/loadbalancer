@@ -16,7 +16,7 @@ import matplotlib.ticker as ticker
 import numpy as np
 
 # ── Load data ──────────────────────────────────────────────────────────────────
-results_dir = sys.argv[1] if len(sys.argv) > 1 else "results-20260519-100906"
+results_dir = sys.argv[1] if len(sys.argv) > 1 else "results/results-static-20260519-100906"
 df = pd.read_csv(f"{results_dir}/summary.csv")
 
 # Parse load level as integer
