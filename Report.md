@@ -1,14 +1,10 @@
----
-title: 'Replicating: "The Title of Paper You Selected From The List"'
-
----
-
 # Replicating: "Load is not what you should balance: Introducing Prequal"
 
 **Team Members:**  
 Giacomo Buscaglia (giacomo.buscaglia@mail.polimi.it);  
 Simone Pizzelli (simone.pizzelli@mail.polimi.it);  
 Davide Roccuzzo (davide.roccuzzo@mail.polimi.it)
+
 
 ---
 
@@ -28,17 +24,18 @@ Introduce the paper by summarizing:
 - The problem the paper addresses and its importance
 
 Modern large-scale services such as YouTube are composed of thousands of distributed jobs, each replicated across hundreds or thousands of machines for reasons of scalability and redundancy. Any two jobs in such an architecture communicate via remote procedure calls (RPCs), and whenever a client job sends a query to a server job, a load balancer must decide which of the many available server replicas should handle that particular request. This decision is made millions of times per second, and even small inefficiencies in this process translate into wasted resources and degraded user experience.
-The problem the Prequal paper addresses is the following: in a multi-tenant environment where server replicas share machines with unrelated workloads (called antagonists), how should a load balancer route requests so as to minimize tail latency, control error rates, and keep resource utilization stable, while remaining lightweight enough to run at production scale?
-The challenge is more subtle than it might appear. Each replica (running inside its own virtual machine) is allocated a guaranteed share of the backend's CPU (called CPU allocation), but the backends themselves are shared with other processes. If a single replica happens to share its host with an antagonist that temporarily bursts above its own allocation, the CPU-isolation mechanisms of the hypervisor will kick in and throttle that replica, severely impacting any requests it is currently serving. Because such bursts are unpredictable, unevenly distributed, and invisible to the application, traditional load-balancing strategies that assume homogeneous server capacity perform poorly. The paper shows empirical data from YouTube demonstrating that, even when 1-minute-averaged CPU usage looks well within allocation, 1-second-resolution traces reveal frequent spikes well above the limit on a non-trivial subset of replicas.
+The problem the paper addresses is the following: 
+"In a multi-tenant environment where server replicas share machines with unrelated workloads (called antagonists), how should a load balancer route requests so as to minimize tail latency, control error rates, and keep resource utilization stable, while remaining lightweight enough to run at production scale?"
+The problem is more challenging than it might appear. Each replica (running inside its own virtual machine) is allocated a guaranteed share of the backend's CPU (called CPU allocation), but the backends themselves are shared with other processes. If a single replica happens to share its host with an antagonist that temporarily bursts above its own allocation, the CPU-isolation mechanisms of the hypervisor will kick in and throttle that replica, severely impacting any requests it is currently serving. Because such bursts are unpredictable, unevenly distributed, and invisible to the application, traditional load-balancing strategies that assume homogeneous server capacity perform poorly. The paper shows empirical data from YouTube demonstrating that, even when 1-minute-averaged CPU usage looks well within allocation, 1-second-resolution traces reveal frequent spikes well above the limit on a non-trivial subset of replicas.
 - The key ideas behind its solution and its approach
-Prequal — short for **Probing to Reduce Queuing and Latency** — is a load-balancing policy developed and deployed in production at Google, primarily on YouTube and 20+ other large-scale services. It is built on top of the Power-of-d-Choices (PodC) paradigm, in which the load balancer samples d candidate replicas for each incoming query and forwards the query to the most suitable one according to some scoring rule. Prequal makes two specific design choices that, combined, distinguish it from prior PodC implementations.
-- First, Prequal uses **Requests-In-Flight (RIF)** and **recent latency** as the load signals, instead of **CPU utilization**. RIF is an instantaneous count of how many requests a replica is currently processing. Recent latency is the median latency of completed queries over a short sliding window. Both signals are inherently up-to-date, unlike CPU utilization which must be averaged over a non-trivial time window to be meaningful. Furthermore, RIF doubles as a leading indicator of future work and as a direct constraint on per-replica RAM usage, which makes it doubly useful.
-- Second, Prequal combines RIF and latency through a **Hot-Cold Lexicographic (HCL) rule**, rather than a linear combination. Each probed replica is classified as *"hot"* if its RIF exceeds the QRIF-th quantile of the global RIF distribution (default 0.84), and *"cold"* otherwise. If at least one cold replica is available among the candidates, the lowest-latency cold replica is chosen; otherwise, the lowest-RIF hot replica is chosen.
+Prequal — short for **Probing to Reduce Queuing and Latency** — is a load-balancing policy developed and deployed in production at Google, primarily on YouTube and 20+ other large-scale services. It is built on top of the Power-of-d-Choices (PodC) paradigm, in which the load balancer samples d candidate replicas for each incoming query and forwards the query to the most suitable one according to some decision rules. Prequal makes two specific design choices that, combined, distinguish it from prior PodC implementations.
+- First, Prequal uses **Requests-In-Flight (RIF)** and **recent latency** as the load signals, instead of **CPU utilization**. RIF is an instantaneous count of how many requests a replica is currently processing. Recent latency is the median latency of completed queries over a short sliding window. Both signals are inherently up-to-date, unlike CPU utilization which must be averaged over a non-trivial time window to be meaningful. Furthermore, RIF can be considered doubly useful since it also works as an indicator of future work and as a direct constraint on per-replica RAM usage.
+- Second, Prequal combines RIF and latency through a **Hot-Cold Lexicographic (HCL) rule**. Each probed replica is classified as *"hot"* if its RIF exceeds the QRIF-th quantile of the global RIF distribution (default 0.84), and *"cold"* otherwise. If at least one cold replica is available among the candidates, the lowest-latency cold replica is chosen; otherwise, the lowest-RIF hot replica is chosen.
 - The main contributions
 The paper points out three main contributions.
 Contribution 1:The combination of RIF and latency through strict hot/cold lexicographic prioritization is, to the authors' knowledge, new. The paper compares HCL empirically against nine other replica-selection rules (such as Random, Round-Robin, WRR, LeastLoaded, LL-Po2C, YARP-Po2C, a linear combination of RIF and latency, the C3 scoring rule, and Prequal itself) on a controlled testbed. HCL outperforms all of them at both moderate and high load levels.
 Contribution 2: Asynchronous probing with a managed probe pool. The async probing scheme — in which probes are issued out of the request path and selection draws from a pool managed with age-out, bounded reuse, and remove-worst — is a novel application of ideas from the theory of balanced allocations with memory. It allows Prequal to retain the freshness benefits of active probing while keeping per-request critical-path overhead negligible.
-Contribution 3: Large-scale production evidence.The reported outcomes — tail-latency reductions of 2×, tail-RIF reductions of 5–10×, tail-memory savings of 10–20%, and near-elimination of load-imbalance errors — make a strong case that the academic theory of Power-of-d-Choices works as well in industrial practice as it does in mathematical models. The paper also documents how these gains translated directly into higher achievable utilization targets and substantial datacenter resource savings.
+Contribution 3: Large-scale production evidence.The reported outcomes — tail-latency reductions of 2×, tail-RIF reductions of 5–10×, tail-memory savings of 10–20%, and near-elimination of load-imbalance errors — make a strong case that the academic theory of Power-of-d-Choices works as well in industrial practice as it does in mathematical models.
 
 
 # 2. Selected Result
@@ -63,7 +60,7 @@ What about the errors??
 
 # 3. Environment Setup
 
-This section documents the hardware, software, configuration, and deviations from the original Prequal paper so that the experiment can be reproduced by someone else.
+This section documents the hardware/software configuration applied in our experiment and the deviations from the original Prequal paper so that anyone interested can replicate the experiment itself.
 
 ## 3.1 Hardware Environment
 
@@ -85,10 +82,8 @@ The 15 nodes were assigned the following roles via the profile and a per-role st
 | Observability (`obs`) | 1 | .10 | Prometheus + Grafana |
 | Prequal load balancer | 1 | .11 | One of the two LB instances |
 | Round-Robin load balancer | 1 | .12 | Baseline LB instance |
-| Backend (heavy antagonist) | 4 | .21–.24 | `cpu_load=350`, 7 burner goroutines |
-| Backend (light antagonist) | 3 | .25–.27 | `cpu_load=150`, 3 burner goroutines |
-| Backend (clean) | 3 | .28–.30 | `cpu_load=0`, no antagonist |
-| Load generator (`loadgen`) | 2 | .31–.32 | hey-based load injection |
+| Backend | 10 | .21–.30 | Processing the requests |
+| Load generator (`loadgen`) | 2 | .31–.32 | Hey-based load injection |
 
 The two load balancers and the 10 backends were placed on separate physical machines to ensure that CPU contention came exclusively from the configured antagonists, not from co-location with other components of our own system. The observability node was likewise separate so that Prometheus scraping and Grafana rendering could not interfere with the measured paths.
 
@@ -119,21 +114,41 @@ The original Prequal paper (Wydrowski et al., NSDI '24) **does not publish sourc
 
 ```
 loadbalancer/
-├── cmd/server/main.go          # LB entry point
+├── cmd/server/main.go              # LB entry point (also /admin/algorithm, /admin/load switch)
 ├── pkg/loadbalancer/
-│   ├── balancer.go             # HCL rule, PodC sampling, async probing
-│   ├── types.go                # Defines the Server, ProbeResult, Config structs
-│   ├── metrics.go              # Prometheus metric definitions
-│   └── health.go               # (dead code from original repo)
-├── backend/main.go             # HTTP backend: SHA256 work + CPU burner
-├── backend/Dockerfile          # Backend container image
-├── Dockerfile                  # LB container image
-├── profile.py                  # CloudLab topology (15 nodes)
-├── cloudlab-setup.sh           # Per-role startup script
-├── run-experiment.sh           # Main load-ramp experiment
-├── parse-results.sh            # Query output into a CSV summary
-├── experiment-rif-source.sh    # Secondary RIF-source experiment
-└── docker-compose.yml          # Local version (5 backends)
+│   ├── balancer.go                 # HCL rule, PodC sampling, async probing
+│   ├── types.go                    # Defines the Server, ProbeResult, Config structs
+│   ├── metrics.go                  # Prometheus metric definitions
+│   └── health.go                   # (dead code from original repo)
+├── internal/
+│   ├── config/config.go            # Config/ServerConfig structs, env + JSON loading
+│   ├── probe/probe.go              # Prober: issues probe RPCs to backends
+│   ├── server/server.go            # HTTP server wiring (LB + metrics endpoint)
+│   └── metrics/metrics.go          # Metrics wrapper (duration, RIF, server health)
+├── backend
+    ├──main.go                 # HTTP backend: SHA256 work + CPU burner
+    └──Dockerfile              # Backend container image
+├── Dockerfile                      # LB container image
+├── profile.py                      # CloudLab topology (15 nodes)
+├── cloudlab-setup.sh               # Per-role startup script
+├── setup.sh                        # Local/environment setup helper
+├── deploy.sh                       # Build + deploy containers
+├── run-experiment.sh               # Static load-ramp experiment (preliminary)
+├── experiment-ab.sh                # Main dynamic two-pass A/B experiment
+├── dynamic-antagonist.sh           # Moving-antagonist scheduler (6 states)
+├── experiment-rif-source.sh**        # Secondary RIF-source experiment
+├── compare.sh                      # Compare two result runs
+├── parse-results.sh                # Parse hey output into a CSV summary
+├── plot_results.py                 # Generate the two-panel Figure 6 plot
+├── watch-backends.sh               # Live backend health/RIF monitor
+├── tests/unit/balancer_test.go     # Unit tests for the HCL selection rule
+├── config/
+│   ├── prometheus/prometheus.yml   # Prometheus scrape config
+│   ├── grafana/dashboards/loadbalancer.json   # Provisioned Grafana dashboard
+│   ├── grafana/provisioning/       # Grafana datasource + dashboard providers
+│   └── nginx/default.conf          # nginx config (local helper)
+├── docker-compose.yml              # Local version (5 backends)
+└── go.mod                          # Go module definition
 ```
 
 ## 3.3 Configuration Parameters
@@ -149,17 +164,18 @@ We deliberately chose a CPU-bound workload because the paper's tests use the sam
 
 ### Antagonist configuration
 
-The contention on a backend is modeled as an in-process **CPU burner**: one or more Go goroutines that run an unrollable arithmetic loop (`x = x*1103515245 + 12345`) and yield periodically via `runtime.Gosched()`. The number of burner goroutines is controlled by an integer `cpuLoad` mapped as `n_burners = cpuLoad / 50` (with a minimum of 1 when `cpuLoad > 0`). For the m510 nodes used here:
+In order to recreate the role played by the antagonists, we came up with the following solution:
+The contention on a backend is modeled as an in-process **CPU burner**: one or more Go goroutines that run an unrollable arithmetic loop (`x = x*1103515245 + 12345`) and yield periodically via `runtime.Gosched()`. The number of active burners is controlled by an integer `cpuLoad` mapped as `n_burners = cpuLoad / 50` (with a minimum of 1 when `cpuLoad > 0`). For the m510 nodes used here:
 
-| Backend group | `cpu_load` | Burners | Cores saturated (of 8) |
-|---|---|---|---|
-| Heavy (server-0..3) | 350 | 7 | 7/8 |
-| Light (server-4..6) | 150 | 3 | 3/8 |
-| Clean (server-7..9) | 0 | 0 | 0/8 |
+| Load on the Backend | `cpu_load` | Active Burners |
+|---|---|---|
+| Heavy  | 250 or more | 5  or more|
+| Light  | Between 100 & 250 | Between 2 & 5  | 
+| Clean  | Less than 100 | Less than 2 | 
 
-The values 350 and 150 were chosen empirically: a previous experiment with the original mapping (heavy = 80, light = 40) collapsed to "1 burner everywhere" because of integer division (80/50 = 1, 40/50 = 0 promoted to 1), and as a consequence the resulting CPU contention was barely measurable on an 8-core machine. The revised values aggressively saturate the contended nodes.
+The values were chosen empirically: a previous experiment with the original mapping (heavy load = 80, light load = 40) collapsed to "1 burner everywhere" because of integer division (80/50 = 1, 40/50 = 0 promoted to 1), and as a consequence the resulting CPU contention was barely measurable on an 8-core machine. The revised values allow to aggressively saturate the contended nodes and to recreate a more realistic scenario.
 
-The `cpuLoad` can also be modified at runtime via the backend's `POST /admin/load?cpu=N` endpoint, exposed specifically to enable dynamic-antagonist experiments without restarting any container.
+The `cpuLoad` can also be modified at runtime via the backend's `POST /admin/load?cpu=N` endpoint without restarting any container.
 
 ### Load balancer parameters
 
@@ -170,7 +186,7 @@ All Prequal-side parameters are exposed via environment variables on the LB cont
 | `LB_ALGORITHM` | `prequal` or `roundrobin` | Selects the policy |
 | `LB_QRIF` | 0.84 | Hot/cold threshold quantile (paper default) |
 | `LB_SELECTION_CHOICES` | 2 | `d` in Power-of-d-Choices |
-| `LB_PROBE_INTERVAL` | 1 s | Time between probe rounds |
+| `LB_PROBE_INTERVAL` | 0.250 s | Time between probe rounds |
 | `LB_PROBE_TIMEOUT` | 2 s | Per-probe RPC timeout |
 | `LB_USE_SERVER_RIF` | false | Use client-local RIF for HCL (server-local when true) |
 | `BACKENDS` | 10.10.1.21:8080,...,10.10.1.30:8080 | Comma-separated backend list |
@@ -181,23 +197,23 @@ All Prequal-side parameters are exposed via environment variables on the LB cont
 |---|---|---|
 | `PORT` | 8080 | Listening port |
 | `SERVER_ID` | `$(hostname)` | Used in `X-Served-By` and logs |
-| `CPU_LOAD` | 0 / 150 / 350 | Initial antagonist intensity |
+| `CPU_LOAD` | 0/.../350| Initial antagonist intensity |
 
 ### Load-ramp experiment parameters
 
 `run-experiment.sh` first **discovers the true saturation throughput** with a 20-second burst (`hey -z 20s -c 200`, no `-q`). The measured throughput is then used as the 100 % anchor for nine load levels:
 
-| Step | Load level (× saturation) | 
-|---|---|
-| 1 | 0.60 |
-| 2 | 0.75 |
-| 3 | 0.90 | 
-| 4 | 1.00 | 
-| 5 | 1.10 |
-| 6 | 1.25 |
-| 7 | 1.45 |
-| 8 | 1.65 |
-| 9 | 1.80 |
+| Step Static | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 
+|---|---|---|---|---|---|---|---|---|---|
+|Load level (× saturation) | 0.60 | 0.75 | 0.90 | 1.00 |  1.10 |1.25 |1.45 | 1.65 | 1.80 |
+|Target QPS (req/s)|275|344|413|459|505|574|665|757|826|
+
+`experiment-ab.sh` first discovers a common saturation reference with a single 20-second uncapped burst (`hey -z 20s -c 200`, no `-q`). Crucially, this anchor is measured once, with both load balancers set to Round-Robin (the more conservative baseline):
+
+| Step Dynamic | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 
+|---|---|---|---|---|---|---|---|---|---|
+|Load level (× saturation) | 0.75 | 0.83 | 0.93 | 1.03 |  1.14 |1.27 |1.41 | 1.57 | 1.74 |
+
 
 For every level, `hey -z 60s -q <target> -c 300` is launched **simultaneously** against both LBs. The concurrency (`-c 300`) is set high enough that the cap `-q` is actually enforced even when the system slows down under overload.
 The concurrency -c 300 was chosen so that the requested rate -q could be effectively enforced even under overload. Internally, `hey` works as a pool of c parallel workers, each of which serially issues a request and waits for the reply; therefore a worker can produce at most 1 / latency requests per second. When the system is overloaded (~400 ms per request in our setup), each worker delivers only ~2.5 req/s, so 300 workers cap out at ~750 req/s — comfortably above our highest target. With a lower concurrency (e.g. -c 50), the cap -q would silently become unreachable and the load level would collapse to whatever the workers could naturally produce. This led to a failure in our first experiment sessions.
@@ -224,9 +240,9 @@ The choice of 10 backends is a compromise between
 
 In the paper, antagonists are **other Google workloads** sharing the same physical machines under hypervisor isolation. Their CPU consumption is highly variable on sub-second timescales (paper Figure 3 shows machine CPU usage bursting to 2× allocation on 1-second windows).
 
-In the setup, antagonists are **goroutines inside the same backend process**, running a CPU-bound arithmetic loop. <u>They are stationary, not bursty</u>.
+In the setup, antagonists are **goroutines inside the same backend process**, running a CPU-bound arithmetic loop. <u>They are not bursty</u>.
 
-The closest and simple available alternative would be using in-process goroutines and make `CPU_LOAD` mutable at runtime via the `/admin/load` endpoint.
+The closest and simple available alternative that we followed consisted in making `CPU_LOAD` mutable at runtime via the `/admin/load` endpoint during the execution of the experiment.
 
 **Impact on the results**: Prequal's value should be larger against bursty antagonists (because stale signals matter more there). 
 
@@ -238,7 +254,7 @@ Plain Round-Robin has been selected since the original implementation on GitHub 
 
 **Impact on the results**: In principle the gap between RR and Prequal should be *larger* than the gap between WRR and Prequal. This as been addressed as a limitation.
 
-### Async probing
+### Execution of probing
 
 The section 4 of the paper describes an async probing scheme with:
 
@@ -248,13 +264,13 @@ The section 4 of the paper describes an async probing scheme with:
 
 In this version:
 
-* Probes are taken at a fixed periodic interval (default 1 s), they're not generated for each arriving query.
+* Probes are taken at a fixed periodic interval, they're not generated for each arriving query.
 * The latency value exposed by the server and used by HCL is the **median of the last 128 query latencies on the backend**, returned through an `X-Server-Latency-P50` HTTP header on the probe response. This is exposed by our backend specifically so the LB can read a meaningful workload latency instead of measuring the round-trip time.
 * No reuse limit, no remove-worst are implemented in the Github reference repository.
 
 *Why we deviated*: the missing features add significant code complexity and are only necessary at large scale (the paper notes that the reuse limit becomes essential when probing many replicas per query). At 10 backends with periodic probing, our pool never becomes a bottleneck.
 
-*Expected impact*: a more advanced probe pool would react faster to changes. Our 1 Hz probing means HCL sees information that is up to 1 second old. For static-antagonist experiments this is irrelevant. For the dynamic-antagonist follow-up, a faster probe pool would arguably improve Prequal's responsiveness.
+*Expected impact*: a more advanced probe pool would react faster to changes. Our 4 Hz probing means HCL sees information that is up to 250 ms old. For static-antagonist experiments this is irrelevant. For the dynamic-antagonist follow-up, a faster probe pool would arguably improve Prequal's responsiveness.
 
 ### Sampling: without replacement (matches paper)
 
@@ -274,27 +290,34 @@ A few choices in our setup had to be made because the paper leaves them implicit
 
 * **Initial probe state at startup**. The paper does not describe what HCL does when the probe pool is empty (e.g. immediately after a container restart). We default to random selection for the first ~1 second, until probes arrive.
 * **Latency window size on the backend**. The paper §4 mentions "a set of recent latency values", without committing to a number. We chose 128 samples as a sliding window large enough to be stable across noisy queries but small enough to react quickly to load changes (at ~400 req/s per backend, 128 samples represents the last ~300 ms of traffic).
-* **Hardware tuning for antagonist intensity**. The paper expresses antagonist intensity as a fraction of machine CPU allocation. We had to translate this into a concrete count of burner goroutines on an 8-core m510. After empirical calibration we chose 7 burners for "heavy" (≈ 88 % of one node) and 3 for "light" (≈ 38 % of one node).
+* **Hardware tuning for antagonist intensity**. The paper expresses antagonist intensity as a fraction of machine CPU allocation. We had to translate this into a concrete count of burner goroutines on an 8-core m510 (7 burners ≈ 88 % of one node, 3 ≈ 38 % of one node).
 
 These choices are documented here rather than buried in code, so that any future reproducer can either accept them or vary them deliberately.
 
 ---
 
-This setup is what is exercised by the experiments reported in the following section. All configuration files (`profile.py`, `cloudlab-setup.sh`, `Dockerfile`, `backend/Dockerfile`, `docker-compose.yml`) and the two scripts (`run-experiment.sh`, `experiment-rif-source.sh`) are tracked in the repository at the commit hash referenced above, so a reader can clone, instantiate the CloudLab profile, and obtain the same environment without manual intervention.
+This setup is what is exercised by the experiments reported in the following section. All configuration files (`profile.py`, `cloudlab-setup.sh`, `Dockerfile`, `backend/Dockerfile`, `docker-compose.yml`) and the two scripts (`run-experiment.sh`, `experiment-ab.sh`) are tracked in the repository at the commit hash referenced above, so a reader can clone, instantiate the CloudLab profile, and obtain the same environment without manual intervention.
+
+
 
 # 4. Experiment Results
 
-This section describes the execution of the load-ramp experiment in both its static-antagonist and dynamic-antagonist variants, the measurement methodology, the obtained results, and a comparison against the original paper. It also documents the debugging work required to reach a functioning setup.
+This section describes the execution of the load-ramp experiment, the measurement methodology, the obtained results, and a comparison against the original paper. It also documents the debugging work required to reach a functioning setup. Our main experiment is the dynamic-antagonist A/B run (Section 4.1.3); the static-antagonist run (Section 4.1.2) is a preliminary baseline that we keep because it documents the cross-policy contamination problem (Issue 4) that motivated the cleaner A/B design.
 
 ## 4.1 Execution Procedure
 
 ### 4.1.1 Environment Bootstrapping
 
+At the beginning of any experiment we launch the command
+```bash
+tmux new -s exp
+```
+
 Before launching any measurement, the CloudLab environment was verified to be fully operational. From `loadgen-0` (10.10.1.31) we ran connectivity checks against both load balancers:
 
 ```bash
-curl http://10.10.1.11:8080/health   # Prequal LB
-curl http://10.10.1.12:8080/health   # Round-Robin LB
+curl http://10.10.1.11:8080/health   # LB 1
+curl http://10.10.1.12:8080/health   # LB 2
 ```
 
 Both returned `{"status":"healthy",...}` immediately. We additionally verified all ten backends via `curl http://10.10.1.2X:8080/health`
@@ -312,19 +335,7 @@ The script executes in three phases.
 
 **Phase 1 — Saturation discovery.** Before any ramped load is applied, a 20-second uncapped burst (`hey -z 20s -c 200`) is launched simultaneously against both load balancers. This measures the true maximum throughput achievable under the configured antagonist pressure, providing an empirical anchor for the 100 % load level. 
 
-**Phase 2 — Load ramp.** Nine load levels were tested, from 60 % to 180 % of the measured saturation throughput:
-
-| Step | Load level | Target QPS (approx.) |
-|------|-----------|----------------------|
-| 1    | 60 %      | 275 req/s            |
-| 2    | 75 %      | 344 req/s            |
-| 3    | 90 %      | 413 req/s            |
-| 4    | 100 %     | 459 req/s            |
-| 5    | 110 %     | 505 req/s            |
-| 6    | 125 %     | 574 req/s            |
-| 7    | 145 %     | 665 req/s            |
-| 8    | 165 %     | 757 req/s            |
-| 9    | 180 %     | 826 req/s            |
+**Phase 2 — Load ramp.** Nine load levels were tested, from 60 % to 180 % of the measured saturation throughput.
 
 For each level, `hey` was launched simultaneously against both LBs:
 
@@ -345,7 +356,8 @@ Real time results are described in section 4.2.
 
 ### 4.1.3 Dynamic Antagonist Experiment
 
-The dynamic-antagonist variant is the part of the experiment that was substantially redesigned. Two things changed with respect to the static run: **how the two algorithms are compared** (a clean A/B procedure, `experiment-ab.sh`) and **what the antagonist does over time** (a new set of moving load states, `dynamic-antagonist.sh`). It was launched with:
+The dynamic-antagonist variant is the part of the experiment that was redesigned. Two things changed with respect to the static run: **how the two algorithms are compared** (a clean A/B procedure, `experiment-ab.sh`) and **what the antagonist does over time** (a new set of moving load states, `dynamic-antagonist.sh`). It was launched with:
+Manca un comando sudo ... prima di lanciare l'esperimento
 
 ```bash
 ./experiment-ab.sh 60 dynamic
@@ -353,41 +365,26 @@ The dynamic-antagonist variant is the part of the experiment that was substantia
 
 #### Why a two-pass A/B procedure
 
-In the static experiment both load balancers were driven simultaneously — Prequal on `.11`, Round-Robin on `.12` — each one routing to the *same* shared pool of ten backends. We realised this design contaminates the very signal Prequal relies on. While Prequal steers a query away from a momentarily loaded backend, the Round-Robin LB keeps flooding that same backend regardless of its state. The two policies fight over the same servers, so the in-flight count Prequal probes no longer reflects "Prequal's own decisions" but the superposition of both LBs. The measured gap between the policies is therefore artificially compressed.
+In the static experiment both load balancers were driven simultaneously — Prequal on `.11`, Round-Robin on `.12` — each one routing to the *same* shared pool of ten backends. We realised this design contaminates the very signal Prequal relies on. The two policies fight over the same servers, so the in-flight count Prequal probes no longer reflects "Prequal's own decisions" but the union of both LBs. The measured gap between the policies is therefore artificially compressed.
 
-To remove this confound, `experiment-ab.sh` runs the comparison as a genuine A/B in **two separate passes over the same conditions**, switching the algorithm at runtime through the `/admin/algorithm?algo=…` endpoint (`cmd/server/main.go`) so no container is ever redeployed:
+To remove this problem, `experiment-ab.sh` runs the comparison as a A/B in **two separate passes over the same conditions**, switching the algorithm at runtime through the `/admin/algorithm?algo=…` endpoint (`cmd/server/main.go`) so no container is ever redeployed:
 
-* **Pass 1 — all-Prequal fleet:** both `.11` and `.12` are set to `prequal`.
-* **Pass 2 — all-RR fleet:** both `.11` and `.12` are set to `roundrobin`.
+* **Pass 1 — all-Prequal requests:** both `.11` and `.12` are set to `prequal`.
+* **Pass 2 — all-RR requests:** both `.11` and `.12` are set to `roundrobin`.
 
-Within a pass the routing across the fleet is homogeneous, so there is no cross-policy contamination. The two passes see the same backends, the same antagonist schedule, and the same offered load; only the algorithm differs. This is the cleaner A/B that the static run lacked.
+The two passes see the same backends, the same antagonist schedule, and the same offered load, only the algorithm differs. This is the cleaner A/B that the static run lacked.
 
-Each pass drives both LBs with `hey`. The file actually parsed is the one from `.11` (the *canonical* LB); `.12` exists only to add the second half of the fleet load (its output is written to `_lb2/` and ignored by `parse-results.sh`). Two operational details support a fair comparison:
+Each pass drives both LBs with `hey`. The file actually parsed is the one from `.11` because the `.12` will not add new information.
 
-* The LBs run with `LB_USE_SERVER_RIF=true`, so every LB reads the **total** RIF reported by the backend (`X-Server-RIF`) rather than only its own local in-flight count. With two Prequal LBs in parallel this prevents the "multi-LB herd" effect, where both LBs independently pick the same momentarily-idle server and overload it together.
-* `hey` is invoked **without** the `-t` timeout flag. Under overload the tail of the latency distribution lives at 2–4 s; truncating it with a timeout would discard exactly the requests on which the two policies differ and would flatten the comparison. We let every request run to completion instead.
+Before executing the ramp test, a saturation discovery procedure is run for 20 second to obtain a conservative common reference for the tests. The levels were aligned to the paper's Figure 6 so the x-axis matches directly.
 
-The ramp uses `CONC=1000` connections per LB and the nine load levels are taken relative to a **single saturation-discovery pass** (20 s, uncapped, `c=200`) run once with the whole fleet on Round-Robin, which gives a conservative common reference. The levels were aligned to the paper's Figure 6 so the x-axis matches directly:
+#### Antagonist states
 
-| Step | Load level (× saturation) |
-|---|---|
-| 1 | 0.75 |
-| 2 | 0.83 |
-| 3 | 0.93 |
-| 4 | 1.03 |
-| 5 | 1.14 |
-| 6 | 1.27 |
-| 7 | 1.41 |
-| 8 | 1.57 |
-| 9 | 1.74 |
-
-#### The new antagonist states
-
-The antagonist was also changed from the graded all-servers-loaded profile to a **load-minority** profile that mirrors the paper's scenario more faithfully: *a few antagonists scattered among many healthy replicas*. In every state only 2–3 of the ten backends are hot (`cpu_load=350`, i.e. 7 burner goroutines saturating 7 of 8 cores), and the hot set **moves** through the fleet over time. Because the hot servers shift, Round-Robin keeps hitting them on its fixed rotation, while Prequal always has 7–8 cold replicas to divert toward.
+The antagonist load was selected to reproduce the paper's scenario more faithfully: *a few antagonists scattered among many healthy replicas*. In every state only 2–3 of the ten backends are stressed (`cpu_load=350`, i.e. 7 burner goroutines saturating 7 of 8 cores), and the stressed replicas *change* over time. Because the stressed servers shift, Round-Robin keeps hitting them on its fixed rotation, while Prequal always has 7–8 light replicas to divert toward.
 
 `dynamic-antagonist.sh` calls `/admin/load?cpu=N` on all ten backends in parallel every `INTERVAL` seconds, cycling through six states:
 
-| State   | Hot servers (`cpu_load=350`) | Clean servers (`cpu_load=0`) |
+| State   | Loaded servers  | Clean servers  |
 |---------|------------------------------|------------------------------|
 | HEAD    | s0, s1, s2                   | s3–s9                        |
 | MID     | s3, s4, s5                   | s0–s2, s6–s9                 |
@@ -397,8 +394,6 @@ The antagonist was also changed from the graded all-servers-loaded profile to a 
 | PAIR2   | s6, s7                       | the other eight              |
 
 The interval is set by the experiment to `DURATION / 6`, so for a 60-second step it is 10 s and one full six-state cycle spans exactly 60 s. Each measurement step therefore captures **exactly one complete cycle**, guaranteeing that the all-Prequal pass and the all-RR pass are exposed to the same time-average of antagonist conditions. A 3-second warm-up after the antagonist starts lets the first state settle, and a 5-second warm-up after each algorithm switch lets the global RIF threshold recompute on the next probe round.
-
-Transitions such as HEAD → MID or TAIL → PAIR are role inversions: servers that were saturated drop to `cpu_load=0` while previously-clean servers spike to 350. Prequal should detect each shift within 1–2 probe cycles (~1–2 s at the 1 Hz probing interval) through both the RIF increase and the latency elevation on the newly-loaded group, and begin steering away. Round-Robin has no such mechanism and keeps its uniform rotation across hot and cold servers alike.
 
 The result-extraction pipeline (`parse-results.sh` + `plot_results.py`) was identical to the static case.
 
@@ -428,9 +423,9 @@ To ensure a rigorous and reproducible visualization environment, we manually cre
 
 ## 4.3 Number of Runs and Statistical Treatment
 
-**Number of runs.** Each experiment configuration (static, dynamic) was executed several times during development to stabilise the setup, and the figures reported here come from one representative full run of each: the static-antagonist run in `results-20260519-100906_STATIC/` and the dynamic-antagonist A/B run in `results-ab-20260531-094836_DINAMIC/`. In the dynamic case the two algorithms are the two passes of the same A/B run (Section 4.1.3), so they share an identical saturation reference, antagonist schedule, and per-level QPS target.
+**Number of runs.** Each experiment configuration (static, dynamic) was executed several times during development to stabilise the setup, and the figures reported here come from one representative full run of each. For more details refer to the directory `results-*/` on GitHub. 
 
-**Within-step sample size.** Each measurement step accumulates a large empirical sample per algorithm. In the static run a step collects roughly 18,000–25,000 completed requests (at ~290–400 req/s over 60 s); in the dynamic A/B run, where the load-minority profile leaves much more aggregate capacity, a step collects roughly 33,000–58,000 completed requests (at ~530–950 req/s over 60 s). For a p99 estimate from N samples the standard error scales as ≈ 1/√N, so at N in the tens of thousands the relative estimation error on the 99th percentile is well below 1 %, making the within-step latency estimates statistically robust.
+
 
 **Percentile definition.** `hey` reports exact empirical quantiles from the full response-time sample collected during each step, measured end-to-end from request dispatch to response receipt at the load generator.
 
@@ -440,21 +435,21 @@ To ensure a rigorous and reproducible visualization environment, we manually cre
 
 Several independent checks were performed to validate that the experiment was measuring what it was intended to measure.
 
-**Saturation sanity check.** We checked that the measured peak throughput was consistent with the workload and the hardware: the per-backend request rate and the observed in-flight counts on the Grafana panels matched what a CPU-bound workload on an 8-core machine should produce, with no implausible values.
+**Saturation sanity check.** We checked that the measured peak throughput was consistent with the workload and the hardware: the per-backend request rate and the observed in-flight counts on the Grafana panels matched what a CPU-bound workload on an 8-core machine should produce.
 
-**Traffic distribution.** We inspected the `X-Served-By` response headers to confirm each policy routed as expected: roughly uniform across all backends under Round-Robin, and visibly skewed toward the unloaded backends under Prequal.
-
-**Antagonist activity.** Before each ramp we confirmed the CPU burners were actually active and, in the dynamic run, that the hot set was moving through the fleet on schedule, by checking the backends' health responses and the Grafana RIF panel.
+**Antagonist activity.** Before the execution of each ramp,  we confirmed the CPU burners were actually active and, in the dynamic experiement, that the stressed set of servers was actually changing on schedule, by checking the backends' health responses and the Grafana RIF panel.
+A quick check on the value of the dynamic antagonist can also be performed by typing the command `top` on the terminal used to manage the specific machine or with the command `watch-backend.sh` in loadgen-0 after the command `dynamic-antagonist.sh`. 
 
 **Equal offered load.** We verified that both algorithms were driven with the same load: identical per-level QPS targets, and total request counts that agree closely in the sub-saturation steps where neither policy is capacity-limited.
 
 **Container stability.** We monitored the containers throughout each run to confirm none restarted, which would have reset the in-memory RIF and latency state and invalidated a step.
 
+
 ## 4.5 Results
 
 ### 4.5.1 Static Antagonist Experiment
 
-The full result set, taken directly from `results-20260519-100906_STATIC/summary.csv`, is summarized below. Latencies are in milliseconds (converted from the microsecond values in the CSV). Here the load levels run from 60 % to 180 % of the measured saturation, and both load balancers are driven simultaneously on the static three-group antagonist profile (heavy / light / clean).
+The full result set is summarized below. Here the load levels run from 60 % to 180 % of the measured saturation, and both load balancers are driven simultaneously on the static three-group antagonist profile (heavy / light / clean).
 
 | Load  | Prequal QPS | RR QPS  | Prequal p50 | RR p50  | Prequal p90  | RR p90   | Prequal p99  | RR p99   |
 |-------|-------------|---------|-------------|---------|--------------|----------|--------------|----------|
@@ -484,16 +479,17 @@ The generated figure is `results-20260519-100906_STATIC/figure6_comparison.png`,
 
 <center>
   <img
-    alt="Static-antagonist load ramp: Prequal sustains higher throughput and slightly lower tail latency than Round-Robin once load exceeds 100% allocation"
-    src="results-20260519-100906_STATIC/figure6_comparison.png"
+    alt="Static-antagonist load ramp: Prequal sustains higher throughput and slightly lower tail latency than Round-Robin once load ex![Uploading file..._mz1pb8qo7]()
+ceeds 100% allocation"
+    src="https://hackmd.io/_uploads/By2VB_eZfx.png"
     style="width:80%;"
     />
-  <p>Figure 2: Static-antagonist load ramp (our reproduction of paper Figure 6). (a) Tail latency on a log scale; the shaded region is above 100 % allocation. (b) Achieved throughput, with the per-step Prequal advantage annotated. Below allocation the two policies coincide; above it Prequal sustains +7–13 % throughput and lower p90/p99, but the gap stays moderate because the static burners produce no sub-second capacity collapses.</p>
+  <p>Figure 2: Static-antagonist load ramp (our reproduction of paper Figure 6).</p>
 </center>
 
 ### 4.5.2 Dynamic Antagonist Experiment
 
-The dynamic A/B result set, taken from `results-ab-20260531-094836_DINAMIC/summary.csv`, is summarized below. Latencies are in milliseconds; QPS is the canonical LB (`.11`) rate. The load levels are 0.75×–1.74× of the common saturation reference (~722 req/s per LB, measured on Round-Robin). Note that the absolute QPS is much higher than in the static run because the load-minority profile keeps 7–8 of the ten backends clean at any instant, leaving far more aggregate capacity.
+The dynamic A/B result set is summarized below. Latencies are in milliseconds; QPS is the canonical LB (`.11`) rate. The load levels are 0.75–1.74 of the common saturation reference (~722 req/s per LB, measured on Round-Robin).
 
 | Load  | Prequal QPS | RR QPS  | Prequal p50 | RR p50  | Prequal p90  | RR p90   | Prequal p99  | RR p99   |
 |-------|-------------|---------|-------------|---------|--------------|----------|--------------|----------|
@@ -509,12 +505,11 @@ The dynamic A/B result set, taken from `results-ab-20260531-094836_DINAMIC/summa
 
 **Below-allocation regime (75–93 %).** As in the static run, the two policies are nearly indistinguishable in throughput (within 0.1 %) and p90 (within 1 %). The first sign of divergence appears at the tail: by 93 % Prequal's p99 (1372 ms) is already ~8 % below RR's (1495 ms), because even below nominal saturation the moving hot set occasionally forces RR to queue behind a loaded server while Prequal sidesteps it.
 
-**Transition at 103 % (allocation boundary).** This is the sharpest result of the whole report. Exactly at the allocation boundary, RR's p99 jumps to **2315 ms** while Prequal's stays at **1476 ms** — a **36 % tail-latency reduction** — and Prequal's p90 is also lower (1004 ms vs 1061 ms). The two policies still deliver the same throughput here (~723 req/s), so the entire effect is concentrated in the tail: Round-Robin starts paying for the requests it keeps routing onto the currently-hot servers, whereas Prequal's HCL rule diverts them to the cold majority.
+**Transition at 103 %.** This is the sharpest result of the whole report. Exactly at the allocation boundary, RR's p99 jumps to **2315 ms** while Prequal's stays at **1476 ms** — a **36 % tail-latency reduction** — and Prequal's p90 is also lower (1004 ms vs 1061 ms). The two policies still deliver the same throughput here (~723 req/s), so the entire effect is concentrated in the tail.
 
 **Overload regime (114–174 %).** Across the six overload steps the dynamic advantage is dominated by the tail latency, and it is much larger than in the static run:
 
-* **p99 latency advantage**: −18 % to −36 %, **average ≈ −26 %**. RR's p99 climbs to 4111 ms at 174 % while Prequal stays at 3384 ms. This is the headline signal of the dynamic experiment, and the gap is widest near the allocation boundary where the moving antagonist hurts a blind policy the most.
-* **Throughput advantage**: 0 % to +4.4 %, **average ≈ +2.4 %**, peaking around the mid-overload steps (114–141 %). It is smaller than the static run's because here both policies are limited by the same large clean-server capacity, so the differentiation shows up in *how fast* requests complete (the tail) rather than in *how many* complete.
+* **p99 latency advantage**: − RR's p99 climbs to 4111 ms at 174 % while Prequal stays at 3384 ms. This is the headline signal of the dynamic experiment, and the gap is widest near the allocation boundary where the moving antagonist hurts a blind policy the most.
 * **p90 latency advantage**: small and positive on average, most visible at 114 % (1052 ms vs 1237 ms, −15 %).
 
 **The HCL median trade-off.** A striking feature of the dynamic data is that Prequal's **p50 is consistently higher** than RR's (e.g. 737 ms vs 599 ms at 174 %). This is not a defect: it is the Hot-Cold Lexicographic rule behaving as designed. By always preferring the lowest-latency *cold* server, Prequal deliberately accepts a slightly worse median in exchange for a much shorter tail. RR's lower median comes from occasionally hitting a fast clean server by luck on its rotation, but it pays for that luck with a long tail whenever the rotation lands on a hot one. Optimising the tail rather than the median is exactly the objective the paper sets for Prequal.
@@ -524,10 +519,10 @@ The generated figure is `results-ab-20260531-094836_DINAMIC/figure6_comparison.p
 <center>
   <img
     alt="Dynamic-antagonist load ramp: Prequal's p99 separates sharply from Round-Robin's right at the 103% allocation boundary and stays 18-36% lower across overload"
-    src="results-ab-20260531-094836_DINAMIC/figure6_comparison.png"
+    src="https://hackmd.io/_uploads/ryentuebMl.png"
     style="width:80%;"
     />
-  <p>Figure 3: Dynamic-antagonist A/B load ramp. (a) Tail latency on a log scale; the green annotations are the per-step p99 reduction of Prequal vs Round-Robin. The RR p99 line (red, solid triangles) lifts away from the Prequal p99 line (blue) right at 103 % allocation and stays 18–36 % higher across the overload region. (b) Achieved throughput, where the two policies are much closer than in the static case. Compared with the static run (Figure 2), the moving antagonist sharpens the tail-latency separation and shifts it earlier, exactly as the paper's motivation predicts.</p>
+  <p>Figure 3: Dynamic-antagonist A/B load ramp (our reproduction of paper Figure 6).</p>
 </center>
 
 ## 4.6 Comparison with the Paper
@@ -554,9 +549,7 @@ We compare against Figure 6 of the paper, matching its axes: load level as a fra
 
 3. *Scale.* With 10 backends instead of 100, the probability that a `d = 2` sample lands entirely on saturated servers is lower, attenuating the statistical-multiplexing effect that makes the paper's separation so dramatic at datacenter scale.
 
-### Takeaways
 
-The core message of the paper is confirmed: **routing by RIF and latency yields lower tail latency, and no worse throughput, once load crosses the allocation boundary** — even in a simplified 10-server testbed with a weaker baseline (plain RR instead of WRR). More importantly, our two-run design isolates *why* the effect exists: the advantage is modest against a static antagonist and grows substantially once the antagonist moves, reproducing the paper's own explanation that Prequal's benefit lives in its ability to track a shifting capacity landscape that a load-unaware policy cannot see. The fact that the trend strengthens precisely when we move toward the paper's assumptions — rather than appearing as an artefact at one operating point — is the strongest evidence that our reproduction captures the real mechanism rather than a coincidence.
 
 ## 4.7 Debugging
 
@@ -574,7 +567,7 @@ The core message of the paper is confirmed: **routing by RIF and latency yields 
 
 **Root cause.** The `applyCPULoad` function in `backend/main.go` maps `cpu_load` to burner goroutines using thresholds at multiples of 50 (0→0 burners, <50→1, <100→2, …). With `cpu_load=80`, the mapping yielded `80/50 → 1` burner. With `cpu_load=40`, it yielded `40/50 → 0`, promoted to 1 by the minimum-1 guard. Both groups were left with a single burner goroutine — an identical configuration producing no observable differentiation. On an 8-core m510 machine, one burner consumes roughly 12.5 % of CPU capacity, far too little to create queuing.
 
-**Fix.** The `cpu_load` values were recalibrated empirically to 350 for the heavy group (7 burners, ~87.5 % of available CPU) and 150 for the light group (3 burners, ~37.5 %). This creates a genuine, measurable asymmetry that both RIF and latency signals can detect. The calibration was verified by confirming that heavy-group backends (`server-0`–`server-3`) showed systematically higher `p50_us` values in their `/health` responses compared to clean-group backends, even when hit at identical request rates.
+**Fix.** The `cpu_load` values were recalibrated empirically to a maximum of 350 for the heavy group. This creates a genuine, measurable asymmetry that both RIF and latency signals can detect. The calibration was verified by confirming that heavy-group backends showed systematically higher `p50_us` values in their `/health` responses compared to clean-group backends, even when hit at identical request rates.
 
 ### Issue 3: Global vs. local RIF threshold in HCL
 
@@ -586,11 +579,12 @@ The core message of the paper is confirmed: **routing by RIF and latency yields 
 
 ### Issue 4: Cross-policy contamination from two LBs on shared backends
 
-**Symptom.** In the dynamic experiment, when Prequal (on `.11`) and Round-Robin (on `.12`) were driven simultaneously against the same ten backends, the gap between the two policies was suspiciously small and unstable from run to run — much smaller than the per-server traffic-distribution check (Section 4.4) suggested it should be.
+**Symptom.** In the original experiment on github, Prequal (on `.11`) and Round-Robin (on `.12`) were driven simultaneously against the same ten backends.
+The gap between the two policies was suspiciously small and unstable from run to run — much smaller than the per-server traffic-distribution check (Section 4.4) suggested it should be.
 
 **Root cause.** The two LBs share the same backend pool. While Prequal steers a query *away* from a momentarily-hot server, the Round-Robin LB keeps sending its share to that same server on its fixed rotation. The RIF that Prequal probes is therefore the superposition of both LBs' decisions, not the consequence of Prequal's own routing. Prequal is in effect being graded on a backend state that a competing, load-blind policy is actively spoiling, which compresses the measured advantage.
 
-**Fix.** The dynamic experiment was restructured as a clean two-pass A/B (`experiment-ab.sh`, Section 4.1.3): one pass with the **whole fleet on Prequal**, a second pass with the **whole fleet on Round-Robin**, switching the algorithm at runtime via `/admin/algorithm`. Within each pass the routing is homogeneous, so there is no cross-policy contamination, and the two passes still share an identical antagonist schedule and per-level QPS target. We also set `LB_USE_SERVER_RIF=true` so each LB reads the total backend-reported RIF (`X-Server-RIF`) instead of only its own local in-flight count, which prevents the two same-algorithm LBs from independently picking the same idle server and overloading it together.
+**Fix.** Our official experiment was restructured as a clean two-pass A/B (`experiment-ab.sh`, Section 4.1.3): one pass with the **whole fleet on Prequal**, a second pass with the **whole fleet on Round-Robin**, switching the algorithm at runtime via `/admin/algorithm`. Within each pass the routing is homogeneous, so there is no cross-policy contamination, and the two passes still share an identical antagonist schedule and per-level QPS target. We also set `LB_USE_SERVER_RIF=true` so each LB reads the total backend-reported RIF (`X-Server-RIF`) instead of only its own local in-flight count, which prevents the two same-algorithm LBs from independently picking the same idle server and overloading it together.
 
 ### Issue 5: Client-side timeout truncating the tail
 
@@ -598,71 +592,12 @@ The core message of the paper is confirmed: **routing by RIF and latency yields 
 
 **Root cause.** Under overload the distinguishing part of the latency distribution lives at 2–4 s. A client timeout cuts every request that exceeds it and re-counts it as a failure, which removes exactly the slow requests on which Round-Robin and Prequal differ and flattens the measured tail (and inflates the apparent throughput symmetrically).
 
-**Fix.** The dynamic A/B ramp runs `hey` **without** a `-t` timeout, letting every request complete and be recorded. This preserves the full tail and is what makes the 18–36 % p99 separation in Section 4.5.2 visible. The raw `hey` output for every step (e.g. `rr_174pct.txt` with a slowest response of 13.2 s) confirms that the long tail was captured rather than truncated.
+**Fix.** The dynamic A/B ramp runs `hey` **without** a `-t` timeout, letting every request complete and be recorded. This preserves the full tail and is what makes the 18–36 % p99 separation in Section 4.5.2 visible..
+## 6. Reproducibility Assessment of the Paper
 
-# 5. Further Exploration
+### 6.1 Was the methodology clearly described?
+### 6.2 Was the artifact usable?
+### 6.3 How difficult was reproduction?
+## Conclusion
 
-## Motivation: from the steady state to the time domain
-
-Every experiment in the paper — and every experiment of ours up to this point — measures the system **at equilibrium**: one operating point per load level, tail latency versus offered load. The paper never looks at the **time domain**: neither how fast each policy *reacts* to a sudden disturbance, nor how long it takes to *recover* once the disturbance ends.
-
-This matters because the paper itself, when discussing its central load-ramp result (Figure 6, §5.1), explicitly acknowledges a precondition for Prequal's advantage:
-
-> *"These results are possible only because many server replicas in our system are not fully allocated with antagonists […]. Prequal allows our job to shift load among replicas so as to fit into these cracks of temporary spare capacity."*
-
-In other words, Prequal's benefit rests on the existence of **spare capacity to divert toward**. The paper never stress-tests this precondition: its antagonists are always a *minority* of the fleet, and its analysis is steady-state. Our research question takes both gaps together:
-
-1. **Transient response.** Under a *correlated* shock that hits a large fraction of the fleet at once (unlike the paper's independent antagonists), how does each policy's tail latency *rise* and *recover* in time?
-2. **The "no-escape" regime.** As we increase the fraction of the fleet hit simultaneously, the cold majority that Prequal relies on shrinks. Where does Prequal's advantage break down?
-
-We take approach (1) from the project brief — *a variation of a test not present in the paper* — implemented entirely on top of our existing system, with no change to the load-balancer code.
-
-## 5.1. Methodology and Result
-
-### Experimental design
-
-We hold the offered load **constant** at 1.0× the (clean-fleet) saturation throughput and apply a **square-wave correlated shock**: every cycle, `NHOT` of the ten backends are driven to `cpu_load=350` simultaneously for `HOT` seconds (the shock), then returned to `cpu_load=0` for `COOL` seconds (recovery). This is a *correlated* disturbance — many machines degrading at the same instant — which the paper's independent antagonists never model. The shock is repeated for many cycles so that the transient can be recovered by **ensemble averaging** rather than read from a single noisy event.
-
-The run is a clean **two-pass A/B** (Section 4.1.3): one pass with the whole fleet on Prequal, one on Round-Robin, switching the algorithm at runtime; never both policies on the shared backends at once. The load generator is invoked with `hey -o csv`, which records **every request** with its latency and dispatch offset; a post-processing script (`plot_shock.py`) folds all cycles onto a common "time-since-shock" axis and computes per-0.5 s-bin percentiles. This per-request binning is essential: `hey`'s aggregate percentiles, averaged over the whole run, would smear the transient and hide it entirely.
-
-The representative run reported here used `NHOT=6`, 180 s per pass, with the deployed probe interval of 250 ms (`results-shock-20260623-021415_NHOT6/`). Correctness was checked on the raw data: both passes returned **100 % HTTP 200** (no truncated tails), the offered load was equal within 1.8 % (≈161 k vs ≈158 k requests), and the shock visibly raised the tail (p99 roughly doubled from the recovered baseline to the shock window in both passes). One measurement note: because the antagonist `curl` calls precede the `sleep` in the shock loop, the *actual* shock window lasted ≈9.7 s rather than the configured 8 s; the analysis uses the **measured** on-duration read back from the edge logs, so the figure is faithful to the shock actually applied.
-
-### Result
-
-<center>
-  <img
-    alt="Transient response to a correlated shock: RR's p99 spike is higher than Prequal's during the shock, while both recover at the same rate once the shock ends"
-    src="results-shock-20260623-021415_NHOT6/shock_response.png"
-    style="width:85%;"
-    />
-  <p>Figure 4: Transient response to a correlated shock (6/10 backends at <code>cpu_load=350</code>, constant 1.0× base load, ensemble-averaged over 8 cycles). The shaded region is the measured shock window. During the shock RR's p99 (red) sits above Prequal's (blue); after the shock both curves fall at the same rate.</p>
-</center>
-
-| Metric | Prequal | Round-Robin | RR / Prequal |
-|---|---|---|---|
-| **Peak p99** (during shock) | 3405 ms | 4344 ms | **1.28×** |
-| **Mean p99** (during shock) | 2964 ms | 3516 ms | **1.19×** |
-| Baseline p99 (end of recovery) | 1412 ms | 1634 ms | 1.16× |
-| Recovery time (to common threshold) | ≈1 s | ≈1 s | = |
-
-During the correlated shock, Prequal holds the tail roughly **20 % below** Round-Robin (peak 1.28×, mean 1.19×), and keeps a lower baseline even between shocks. The separation is real but modest — consistent with the very fresh 250 ms probing, which lets Prequal react so quickly that it barely allows a gap to open. As in the dynamic ramp (Section 4.5.2), Prequal's p50 is slightly *higher* than RR's: the familiar Hot-Cold-Lexicographic trade-off of a worse median for a much shorter tail.
-
-### Interpretation: prevention, not cure
-
-The striking feature of Figure 4 is that **the two policies recover at the same rate**, even though Prequal's spike is clearly lower. This is not a defect — it is the expected and correct behaviour, and it follows directly from what a load balancer can and cannot control:
-
-> A load balancer decides **where** requests go — the *distribution* of load — not the aggregate *service rate* of the fleet.
-
-The two phases of the cycle make this concrete. **During the shock** the fleet is *heterogeneous*: six throttled backends and four clean ones. Here the distribution is everything — Round-Robin keeps sending ≈60 % of traffic onto the throttled servers while the clean ones sit underused, so it wastes capacity and builds deep queues; Prequal diverts onto the clean servers, exploits their full capacity, and so keeps its queues — and its spike — lower. **After the shock** the fleet is *homogeneous* again: all ten backends are clean and identical. There is no longer any hotspot to avoid, so no routing policy can drain the accumulated backlog faster than any other — every backend offers the same service rate, and the drain is pure queueing physics, independent of the algorithm. (The connection-pool cap on `hey` also bounds the backlog similarly for both policies at the instant the shock lifts.)
-
-Hence the equal recovery *slope*, while the recovery *level* stays uniformly in Prequal's favour: it starts from a lower peak and remains at or below Round-Robin throughout the descent. The lesson is that **Prequal's value is prevention, not cure** — it keeps the queue from ever growing large, rather than draining it faster afterwards. This is exactly the paper's own framing, "direct load where capacity is available": during recovery, capacity is available *everywhere equally*, so there is nothing left to direct, and the advantage collapses to zero. It is worth noting that this clean separation is a property of our square-wave design, which fully resets the fleet to a homogeneous state; in a production setting where conditions keep shifting, recovery would overlap the next disturbance and Prequal's continuous re-routing would matter on the way down as well.
-
-### Planned extensions
-
-Two sweeps, runnable with the same harness, complete the study and are in progress:
-
-- **Signal-freshness sweep** (`LB_PROBE_INTERVAL` ∈ {250 ms, 1 s, 2 s}): we expect the transient separation to *widen* as the signal grows staler, because a slower-reacting Prequal lets the queue build before it diverts. This probes, in the time domain, the staleness effect that the paper's Figure 8 only examines at steady state.
-- **Fraction-of-fleet sweep** (`NHOT` ∈ {2, 4, 6, 8}): as the hot fraction grows, the cold majority disappears; we expect Prequal's advantage to fall toward zero — empirically locating the boundary of the "spare capacity" precondition that the paper states but never tests.
-
-
-
+The core message of the paper is confirmed: **routing by RIF and latency yields lower tail latency, and no worse throughput, once load crosses the allocation boundary** — even in a simplified 10-server testbed . More importantly, our two-run design isolates *why* the effect exists: the advantage is modest against a static antagonist and grows substantially once the antagonist moves, reproducing the paper's own explanation that Prequal's benefit lives in its ability to track a shifting capacity landscape that a load-unaware policy cannot see. The fact that the trend strengthens precisely when we move toward the paper's assumptions — rather than appearing as an artefact at one operating point — is the strongest evidence that our reproduction captures the real mechanism rather than a coincidence.
