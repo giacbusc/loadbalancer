@@ -1,0 +1,47 @@
+
+Summary:
+  Total:	109.5154 secs
+  Slowest:	5.2950 secs
+  Fastest:	0.0009 secs
+  Average:	0.7006 secs
+  Requests/sec:	904.4575
+  
+  Total data:	11397441 bytes
+  Size/request:	115 bytes
+
+Response time histogram:
+  0.001 [1]	|
+  0.530 [39285]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  1.060 [43393]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  1.589 [11065]	|■■■■■■■■■■
+  2.119 [3818]	|■■■■
+  2.648 [948]	|■
+  3.177 [330]	|
+  3.707 [102]	|
+  4.236 [29]	|
+  4.766 [7]	|
+  5.295 [6]	|
+
+
+Latency distribution:
+  10% in 0.1262 secs
+  25% in 0.3377 secs
+  50% in 0.6539 secs
+  75% in 0.9486 secs
+  90% in 1.2766 secs
+  95% in 1.6203 secs
+  99% in 2.2802 secs
+
+Details (average, fastest, slowest):
+  DNS+dialup:	0.0029 secs, 0.0009 secs, 5.2950 secs
+  DNS-lookup:	0.0000 secs, 0.0000 secs, 0.0000 secs
+  req write:	0.0007 secs, 0.0000 secs, 0.1833 secs
+  resp wait:	0.6929 secs, 0.0008 secs, 5.2949 secs
+  resp read:	0.0002 secs, 0.0000 secs, 0.1140 secs
+
+Status code distribution:
+  [200]	98984 responses
+
+Error distribution:
+  [68]	Get "http://10.10.1.12:8080": dial tcp 10.10.1.12:8080: socket: too many open files
+

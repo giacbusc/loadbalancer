@@ -47,8 +47,8 @@ Still simplified vs. the paper:
    ```bash
    ssh <user>@loadgen-0.<...>.cloudlab.us
    cd /opt/loadbalancer
-   ./run-experiment.sh 60                       # 60 seconds per load level
-   ./parse-results.sh /tmp/results-XXXXXXXX     # extract CSV summary
+   ./experiments/run-experiment.sh 60                       # 60 seconds per load level
+   ./experiments/parse-results.sh /tmp/results-XXXXXXXX     # extract CSV summary
    ```
 6. Open Grafana at `http://<obs-public-hostname>:3001` (admin/admin),
    add Prometheus datasource at `http://10.10.1.10:9090`.

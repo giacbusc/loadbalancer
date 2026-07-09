@@ -8,11 +8,22 @@
 #      system actually enters the overload regime where Prequal vs RR diverge.
 #   3. Antagonists must be strong (set in profile.py: cpu_load 350/150/0).
 #
-# Usage: ./run-experiment.sh [duration_per_step]   (default 60)
+# Usage: ./run-experiment.sh [duration_per_step] [dynamic]   (default: 60, static)
+#
+# Esempi:
+#   ./run-experiment.sh          # 60s per step, antagonisti statici
+#   ./run-experiment.sh 60       # idem esplicito
+#   ./run-experiment.sh 60 dynamic   # antagonisti dinamici (cambiano ogni 10s)
+#
+# Con "dynamic" viene avviato dynamic-antagonist.sh in background;
+# ad ogni step dell'esperimento i server cambiano carico ciclicamente,
+# rendendo più evidente la differenza tra Prequal e Round-Robin.
 
 set -e
 
 DURATION="${1:-60}"
+DYNAMIC="${2:-}"          # se "dynamic", avvia il ciclo antagonista
+ANTAG_PID=""              # PID del processo antagonista (se avviato)
 LB_PREQUAL="http://10.10.1.11:8080"
 LB_RR="http://10.10.1.12:8080"
 RESULTS_DIR="/tmp/results-$(date +%Y%m%d-%H%M%S)"
@@ -22,6 +33,7 @@ echo "============================================="
 echo "Prequal vs Round-Robin - Load Ramp (fixed)"
 echo "============================================="
 echo "Duration per step:  ${DURATION}s"
+echo "Antagonist mode:    ${DYNAMIC:-static}"
 echo "Results directory:  $RESULTS_DIR"
 echo
 
@@ -35,6 +47,41 @@ echo "Both LBs reachable."
 echo
 
 # ---------------------------------------------------------------------------
+# ANTAGONISTA DINAMICO (opzionale)
+# Avvia dynamic-antagonist.sh in background se richiesto.
+# Lo script cambia il carico dei backend ogni 10s chiamando /admin/load.
+# ---------------------------------------------------------------------------
+if [ "$DYNAMIC" = "dynamic" ]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    ANTAG_SCRIPT="$SCRIPT_DIR/dynamic-antagonist.sh"
+    if [ ! -x "$ANTAG_SCRIPT" ]; then
+        echo "ERROR: $ANTAG_SCRIPT non trovato o non eseguibile." >&2
+        echo "  Esegui: chmod +x dynamic-antagonist.sh" >&2
+        exit 1
+    fi
+    echo "--- Avvio dynamic-antagonist.sh in background ---"
+    ANTAG_LOG="/tmp/antagonist-$(date +%Y%m%d-%H%M%S).log"
+    ANTAG_LOG="$ANTAG_LOG" "$ANTAG_SCRIPT" &
+    ANTAG_PID=$!
+    echo "  PID antagonista: $ANTAG_PID"
+    echo "  Log antagonista: $ANTAG_LOG"
+    sleep 3   # lascia tempo all'antagonista di applicare il primo stato
+    echo "  Antagonista attivo."
+    echo
+fi
+
+# Registra cleanup: ferma l'antagonista e ripristina il carico base
+cleanup() {
+    if [ -n "$ANTAG_PID" ] && kill -0 "$ANTAG_PID" 2>/dev/null; then
+        echo ""
+        echo "--- Arresto dynamic-antagonist (PID $ANTAG_PID) ---"
+        kill "$ANTAG_PID" 2>/dev/null || true
+        wait "$ANTAG_PID" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT INT TERM
+
+# ---------------------------------------------------------------------------
 # STEP 1: Discover the TRUE saturation throughput.
 # We send an UNCAPPED burst (no -q) with high concurrency. hey will push as
 # hard as it can; Requests/sec is then the real ceiling under this workload
@@ -42,8 +89,10 @@ echo
 # ---------------------------------------------------------------------------
 echo "--- Saturation discovery (20s, uncapped, c=200, both LBs) ---"
 hey -z 20s -c 200 "$LB_PREQUAL" > "$RESULTS_DIR/saturation_prequal.txt" 2>&1 &
+PID_SAT_P=$!
 hey -z 20s -c 200 "$LB_RR"     > "$RESULTS_DIR/saturation_rr.txt"     2>&1 &
-wait
+PID_SAT_R=$!
+wait "$PID_SAT_P" "$PID_SAT_R"
 SAT=$(grep -E "^[[:space:]]*Requests/sec:" "$RESULTS_DIR/saturation_prequal.txt" | awk '{print $2}' | head -1)
 SAT_INT=${SAT%.*}
 echo "Measured saturation throughput (per LB, both running): ${SAT_INT} req/s"
@@ -61,8 +110,8 @@ fi
 # We CAP hey with -q so the requested rate is enforced. We also raise
 # concurrency so the cap is actually reachable.
 # ---------------------------------------------------------------------------
-LEVELS=(0.60 0.75 0.90 1.00 1.10 1.25 1.45 1.65 1.80)
-NAMES=("60pct" "75pct" "90pct" "100pct" "110pct" "125pct" "145pct" "165pct" "180pct")
+LEVELS=(0.75 0.83 0.93 1.03 1.14 1.27 1.41 1.57 1.74)
+NAMES=("75pct" "83pct" "93pct" "103pct" "114pct" "127pct" "141pct" "157pct" "174pct")
 
 for i in "${!LEVELS[@]}"; do
     LEVEL=${LEVELS[$i]}
@@ -76,10 +125,14 @@ for i in "${!LEVELS[@]}"; do
     # Concurrency high enough to actually drive QPS even when the system
     # is slow under overload (otherwise hey self-throttles).
     # NOTE: hey's -q is per-worker, so divide total target QPS by concurrency.
-    CONC=300
-    QPS_PER_WORKER=$(awk -v q="$QPS" -v c="$CONC" 'BEGIN{printf "%.0f", q/c}')
-    [ "$QPS_PER_WORKER" -lt 1 ] && QPS_PER_WORKER=1
+    CONC=1000
+    QPS_PER_WORKER=$(awk -v q="$QPS" -v c="$CONC" 'BEGIN{printf "%.2f", q/c}')
 
+    # NB: niente "-t 1". Un timeout di 1s tronca la coda della distribuzione
+    # (p95/p99 leggono ~0.99s per entrambi) e gonfia il throughput, perché i
+    # worker abbandonano le richieste lente e ne sparano subito altre. È esatta-
+    # mente il segnale su cui Prequal vince (coda a 2-4s sotto overload) a venire
+    # cancellato. Default di hey = 20s, sufficiente.
     hey -z "${DURATION}s" -q "$QPS_PER_WORKER" -c "$CONC" "$LB_PREQUAL" \
         > "$RESULTS_DIR/prequal_${NAME}.txt" 2>&1 &
     PID_P=$!
@@ -101,4 +154,7 @@ done
 echo "============================================="
 echo "Experiment complete. Results in: $RESULTS_DIR"
 echo "Parse with: ./parse-results.sh $RESULTS_DIR"
+if [ -n "$ANTAG_PID" ]; then
+    echo "Antagonist log:    $ANTAG_LOG"
+fi
 echo "============================================="

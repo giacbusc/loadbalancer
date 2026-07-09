@@ -29,6 +29,18 @@ type LoadBalancer struct {
 	// probes as hot or cold. This matches the paper's definition: "an
 	// estimate of the distribution of RIF across replicas".
 	currentRIFThreshold int32
+
+	// probeIntervalNs is the current probing period in nanoseconds, mutable at
+	// runtime via SetProbeInterval (used by the /admin/probe-interval endpoint
+	// for the freshness sweep). The probing goroutine resets its ticker when
+	// this changes.
+	probeIntervalNs int64
+
+	// useServerRIF (0/1) selects the RIF source for HCL, mutable at runtime via
+	// SetUseServerRIF (/admin/use-server-rif): 1 = server-local RIF delivered by
+	// probes (probe-staleable, matches the paper), 0 = client-local RIF tracked
+	// in real time by this LB (always fresh). Initialised from Config.UseServerRIF.
+	useServerRIF int32
 }
 
 func NewLoadBalancer(config *Config, logger *slog.Logger) *LoadBalancer {
@@ -48,7 +60,7 @@ func NewLoadBalancer(config *Config, logger *slog.Logger) *LoadBalancer {
 	if config.QRIF == 0 {
 		config.QRIF = 0.84
 	}
-	return &LoadBalancer{
+	lb := &LoadBalancer{
 		servers:   make([]*Server, 0),
 		probePool: make(map[string]*ProbeResult),
 		config:    config,
@@ -56,6 +68,10 @@ func NewLoadBalancer(config *Config, logger *slog.Logger) *LoadBalancer {
 		logger:    logger,
 		metrics:   NewMetrics(),
 	}
+	if config.UseServerRIF {
+		lb.useServerRIF = 1
+	}
+	return lb
 }
 
 // -----------------------------------------------------------------------------
@@ -63,14 +79,38 @@ func NewLoadBalancer(config *Config, logger *slog.Logger) *LoadBalancer {
 // -----------------------------------------------------------------------------
 
 func (lb *LoadBalancer) StartProbing() {
+	atomic.StoreInt64(&lb.probeIntervalNs, int64(lb.config.ProbeInterval))
 	go func() {
 		ticker := time.NewTicker(lb.config.ProbeInterval)
 		defer ticker.Stop()
+		cur := int64(lb.config.ProbeInterval)
 		for range ticker.C {
 			lb.probeAllServers()
 			lb.recomputeGlobalThreshold()
+			// Apply a runtime change to the probing period, if any.
+			if n := atomic.LoadInt64(&lb.probeIntervalNs); n > 0 && n != cur {
+				cur = n
+				ticker.Reset(time.Duration(n))
+			}
 		}
 	}()
+}
+
+// SetProbeInterval changes the probing period at runtime. The new value takes
+// effect on the next tick (so a switch from a long to a short interval waits up
+// to the old period once). Ignored if d <= 0.
+func (lb *LoadBalancer) SetProbeInterval(d time.Duration) {
+	if d > 0 {
+		atomic.StoreInt64(&lb.probeIntervalNs, int64(d))
+	}
+}
+
+// ProbeInterval returns the current (possibly runtime-overridden) probing period.
+func (lb *LoadBalancer) ProbeInterval() time.Duration {
+	if n := atomic.LoadInt64(&lb.probeIntervalNs); n > 0 {
+		return time.Duration(n)
+	}
+	return lb.config.ProbeInterval
 }
 
 func (lb *LoadBalancer) probeAllServers() {
@@ -193,8 +233,18 @@ func (lb *LoadBalancer) AddServer(server *Server) {
 // Replica selection
 // -----------------------------------------------------------------------------
 
+func (lb *LoadBalancer) SetAlgorithm(algo Algorithm) {
+	lb.mutex.Lock()
+	lb.config.Algorithm = algo
+	lb.mutex.Unlock()
+	lb.logger.Info("algorithm switched", slog.String("to", string(algo)))
+}
+
 func (lb *LoadBalancer) SelectServer() *Server {
-	if lb.config.Algorithm == AlgorithmRoundRobin {
+	lb.mutex.RLock()
+	algo := lb.config.Algorithm
+	lb.mutex.RUnlock()
+	if algo == AlgorithmRoundRobin {
 		return lb.selectServerRR()
 	}
 	return lb.selectServerPrequal()
@@ -286,10 +336,25 @@ func (lb *LoadBalancer) selectServerPrequal() *Server {
 }
 
 func (lb *LoadBalancer) rifFor(s *Server) int32 {
-	if lb.config.UseServerRIF {
+	if atomic.LoadInt32(&lb.useServerRIF) == 1 {
 		return atomic.LoadInt32(&s.ServerRIF)
 	}
 	return atomic.LoadInt32(&s.RIF)
+}
+
+// SetUseServerRIF switches the RIF source for HCL at runtime (true = server-local
+// from probes, false = client-local real-time). Used by /admin/use-server-rif.
+func (lb *LoadBalancer) SetUseServerRIF(v bool) {
+	var n int32
+	if v {
+		n = 1
+	}
+	atomic.StoreInt32(&lb.useServerRIF, n)
+}
+
+// UseServerRIF reports the current RIF source (true = server-local).
+func (lb *LoadBalancer) UseServerRIF() bool {
+	return atomic.LoadInt32(&lb.useServerRIF) == 1
 }
 
 // selectBestCandidate applies the Hot-Cold Lexicographic (HCL) rule:

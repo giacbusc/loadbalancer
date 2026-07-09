@@ -114,6 +114,48 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"healthy"}`))
 	})
+	mux.HandleFunc("/admin/algorithm", func(w http.ResponseWriter, r *http.Request) {
+		algo := r.URL.Query().Get("algo")
+		switch algo {
+		case "prequal":
+			lb.SetAlgorithm(loadbalancer.AlgorithmPrequal)
+		case "rr", "roundrobin":
+			lb.SetAlgorithm(loadbalancer.AlgorithmRoundRobin)
+		default:
+			http.Error(w, `algo must be "prequal" or "rr"`, http.StatusBadRequest)
+			return
+		}
+		fmt.Fprintf(w, "algorithm set to %s\n", algo)
+	})
+	mux.HandleFunc("/admin/probe-interval", func(w http.ResponseWriter, r *http.Request) {
+		v := r.URL.Query().Get("d")
+		if v == "" { // GET current value (used by experiment-shock.sh to record it)
+			fmt.Fprintf(w, "%s\n", lb.ProbeInterval())
+			return
+		}
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			http.Error(w, `d must be a positive Go duration, e.g. "250ms", "1s", "2s"`, http.StatusBadRequest)
+			return
+		}
+		lb.SetProbeInterval(d)
+		fmt.Fprintf(w, "probe interval set to %s\n", d)
+	})
+	mux.HandleFunc("/admin/use-server-rif", func(w http.ResponseWriter, r *http.Request) {
+		v := r.URL.Query().Get("v")
+		switch v {
+		case "": // GET current value (recorded by experiment-shock.sh)
+			fmt.Fprintf(w, "%t\n", lb.UseServerRIF())
+		case "true", "1":
+			lb.SetUseServerRIF(true)
+			fmt.Fprintf(w, "use_server_rif set to true\n")
+		case "false", "0":
+			lb.SetUseServerRIF(false)
+			fmt.Fprintf(w, "use_server_rif set to false\n")
+		default:
+			http.Error(w, `v must be "true" or "false"`, http.StatusBadRequest)
+		}
+	})
 
 	server := &http.Server{
 		Addr:    ":" + *port,
