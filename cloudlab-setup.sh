@@ -84,11 +84,11 @@ EOF
     ALGO="prequal"
     [ "$ROLE" = "lb-rr" ] && ALGO="roundrobin"
 
-    # Parametri configurabili via env al (ri)avvio dello script. Esempio per lo
-    # sweep di freschezza, ri-eseguendo manualmente lo script su un nodo LB:
+    # Parameters configurable via env when (re)running the script. Example for
+    # the freshness sweep, re-running the script manually on an LB node:
     #   LB_PROBE_INTERVAL=1s LB_USE_SERVER_RIF=true \
     #     sudo -E bash cloudlab-setup.sh lb-prequal <repo_url> <branch>
-    # (sudo -E preserva le variabili d'ambiente). Default = setup deployato.
+    # (sudo -E preserves the environment variables). Default = deployed setup.
     PROBE_INTERVAL="${LB_PROBE_INTERVAL:-250ms}"
     USE_SERVER_RIF="${LB_USE_SERVER_RIF:-false}"
     QRIF="${LB_QRIF:-0.84}"
@@ -134,7 +134,7 @@ EOF
         curl -fsSL "$HEY_URL" -o /usr/local/bin/hey
         chmod +x /usr/local/bin/hey
     fi
-    # Rendi eseguibili tutti gli script (root + cartella experiments/)
+    # Make all scripts executable (root + experiments/ directory)
     chmod +x "$WORKDIR"/*.sh "$WORKDIR"/experiments/*.sh 2>/dev/null || true
     ;;
 

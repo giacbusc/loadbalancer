@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-plot_shock.py — Risposta transitoria a uno shock correlato (esperimento A).
+plot_shock.py — Transient response to a correlated shock (experiment A).
 
-Legge l'output PER-RICHIESTA di hey (-o csv) delle due passate prequal/rr,
-RIPIEGA (folds) tutti i cicli di shock allineandoli all'istante ON, e calcola
-la curva di percentile-latenza vs "tempo dallo shock" via ENSEMBLE AVERAGING.
-Questo è ciò che rende attendibile la misura del transitorio: un singolo evento
-è rumoroso sulla coda, ma mediando N cicli identici la curva p99(t) emerge pulita
-(vedi discussione: probing a 250ms << drenaggio code ~2-4s → transitorio risolto
-con bin a 0.5s).
+Reads hey's PER-REQUEST output (-o csv) from the two prequal/rr passes,
+FOLDS all shock cycles by aligning them to the ON instant, and computes the
+percentile-latency curve vs "time since shock" via ENSEMBLE AVERAGING.
+This is what makes the transient measurement reliable: a single event is
+noisy in the tail, but averaging N identical cycles makes the p99(t) curve
+emerge cleanly (see discussion: 250ms probing << queue drain ~2-4s →
+transient resolved with 0.5s bins).
 
 Usage:
   python3 plot_shock.py /tmp/results-shock-XXXXX
@@ -21,15 +21,15 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-# ── Parametri ────────────────────────────────────────────────────────────────
+# ── Parameters ───────────────────────────────────────────────────────────────
 results_dir = sys.argv[1] if len(sys.argv) > 1 else "."
-BIN = 0.5   # larghezza bin temporale (s) — ben sopra il periodo di probe (250ms)
-MIN_SAMPLES = 20   # bin con meno campioni di così → NaN (non plottato)
+BIN = 0.5   # time bin width (s) — well above the probe period (250ms)
+MIN_SAMPLES = 20   # bins with fewer samples than this → NaN (not plotted)
 
-COLOR_RR      = "#d62728"   # rosso  (come plot_results.py)
-COLOR_PREQUAL = "#1f77b4"   # blu
+COLOR_RR      = "#d62728"   # red  (same as plot_results.py)
+COLOR_PREQUAL = "#1f77b4"   # blue
 
-# ── Metadati dell'esperimento ─────────────────────────────────────────────────
+# ── Experiment metadata ───────────────────────────────────────────────────────
 meta = {}
 with open(os.path.join(results_dir, "meta.env")) as f:
     for line in f:
@@ -39,12 +39,12 @@ with open(os.path.join(results_dir, "meta.env")) as f:
             meta[k] = v
 
 PERIOD   = float(meta["period"])
-HOT_CFG  = float(meta["hot"])      # valore CONFIGURATO (può differire dal reale)
+HOT_CFG  = float(meta["hot"])      # CONFIGURED value (may differ from the real one)
 NHOT     = int(meta["nhot"])
 BASE     = meta.get("base_level", "?")
 SHOCK    = meta.get("shock_load", "?")
 
-# ── Lettura fronti ON (tempi relativi a T0 = start di hey) ─────────────────────
+# ── Read ON edges (times relative to T0 = hey's start) ────────────────────────
 def load_on_edges(path):
     ons = []
     if not os.path.exists(path):
@@ -56,10 +56,10 @@ def load_on_edges(path):
                 ons.append(float(parts[0]))
     return sorted(ons)
 
-# Durata ON REALE misurata dai log (le curl di /admin/load + wait aggiungono
-# overhead allo sleep HOT, così lo shock dura più di HOT_CFG). Usiamo la mediana
-# OFF−ON sui cicli di entrambe le passate, così la figura e lo split ON/OFF
-# rispecchiano lo shock effettivamente applicato.
+# REAL ON duration measured from the logs (the /admin/load curls + wait add
+# overhead to the HOT sleep, so the shock lasts longer than HOT_CFG). We use
+# the median OFF−ON over the cycles of both passes, so the figure and the
+# ON/OFF split reflect the shock that was actually applied.
 def measure_on_duration(path):
     if not os.path.exists(path):
         return None
@@ -73,21 +73,21 @@ def measure_on_duration(path):
 _ons = [measure_on_duration(os.path.join(results_dir, f"{a}_edges.log"))
         for a in ("prequal", "rr")]
 _ons = [x for x in _ons if x]
-HOT = float(np.mean(_ons)) if _ons else HOT_CFG   # durata ON effettiva per fold/figura
+HOT = float(np.mean(_ons)) if _ons else HOT_CFG   # effective ON duration for fold/figure
 
-# ── Folding: per ogni richiesta calcola il "tempo dall'ultimo shock ON" e
-#    aggrega i percentili per bin temporale (ensemble averaging su tutti i cicli).
+# ── Folding: for each request compute the "time since the last shock ON" and
+#    aggregate percentiles per time bin (ensemble averaging over all cycles).
 def fold(algo):
     csv = os.path.join(results_dir, f"{algo}.csv")
     edges = load_on_edges(os.path.join(results_dir, f"{algo}_edges.log"))
     df = pd.read_csv(csv)
 
-    # hey -o csv: colonne "response-time" e "offset" in secondi.
+    # hey -o csv: "response-time" and "offset" columns in seconds.
     rt  = df["response-time"].astype(float).values * 1000.0   # ms
     off = df["offset"].astype(float).values
 
-    # fase = tempo trascorso dall'ultimo fronte ON, scartando ciò che precede il
-    # primo shock e ciò che eccede un periodo (apparterrebbe al ciclo successivo).
+    # phase = time elapsed since the last ON edge, discarding what precedes the
+    # first shock and what exceeds one period (it would belong to the next cycle).
     phase = np.full(len(off), np.nan)
     for i, o in enumerate(off):
         j = bisect.bisect_right(edges, o) - 1
@@ -116,18 +116,19 @@ def fold(algo):
     return (np.array(centers), np.array(p50), np.array(p90),
             np.array(p99), np.array(cnt))
 
-# ── Metriche del transitorio ──────────────────────────────────────────────────
+# ── Transient metrics ─────────────────────────────────────────────────────────
 def baseline_of(centers, p99):
-    """Livello recuperato: mediana p99 nei bin di fine ciclo (ultimi 2s di COOL)."""
+    """Recovered level: median p99 over the end-of-cycle bins (last 2s of COOL)."""
     tail = ~np.isnan(p99) & (centers >= PERIOD - 2.0)
     return np.nanmedian(p99[tail]) if tail.any() else np.nanmin(p99)
 
 def metrics(centers, p99, common_thr):
-    """picco durante ON, p99 medio durante ON, recupero verso una soglia COMUNE.
+    """Peak during ON, mean p99 during ON, recovery towards a COMMON threshold.
 
-    Il recupero usa una soglia ASSOLUTA condivisa tra le due policy: altrimenti,
-    misurandolo rispetto al proprio baseline, la policy con baseline più alto
-    sembrerebbe 'recuperare prima' pur avendo p99 assoluta maggiore (fuorviante).
+    Recovery uses an ABSOLUTE threshold shared by the two policies: otherwise,
+    measuring it against each policy's own baseline, the one with the higher
+    baseline would appear to 'recover sooner' despite having a higher absolute
+    p99 (misleading).
     """
     pre  = ~np.isnan(p99) & (centers < HOT)
     post = ~np.isnan(p99) & (centers >= HOT)
@@ -145,13 +146,13 @@ rr_c, rr50, rr90, rr99, rr_n   = fold("rr")
 
 pr_base = baseline_of(pr_c, pr99)
 rr_base = baseline_of(rr_c, rr99)
-# soglia di recupero COMUNE: +20% del baseline peggiore (confronto equo).
+# COMMON recovery threshold: +20% of the worse baseline (fair comparison).
 COMMON_THR = max(pr_base, rr_base) * 1.20
 
 pr_peak, pr_mean, pr_recov = metrics(pr_c, pr99, COMMON_THR)
 rr_peak, rr_mean, rr_recov = metrics(rr_c, rr99, COMMON_THR)
 
-# ── Figura ─────────────────────────────────────────────────────────────────────
+# ── Figure ─────────────────────────────────────────────────────────────────────
 fig, ax = plt.subplots(figsize=(9, 5.5))
 fig.suptitle(
     "Risposta transitoria a uno shock correlato — Prequal vs Round Robin\n"
@@ -159,7 +160,7 @@ fig.suptitle(
     "ensemble averaging sui cicli)",
     fontsize=12, fontweight="bold", y=0.99)
 
-# Regione "shock ON"
+# "Shock ON" region
 ax.axvspan(0, HOT, color="lightcoral", alpha=0.20, zorder=0)
 ax.axvline(0,   color="gray", linestyle=":", lw=1.3, zorder=1)
 ax.axvline(HOT, color="gray", linestyle=":", lw=1.3, zorder=1)
@@ -170,7 +171,7 @@ ax.text(HOT + 0.1, 0.97, "← shock OFF (recupero)", ha="left", va="top",
 
 ax.set_yscale("log")
 
-# p99 (linea spessa) + p50 (tratteggiata leggera) per entrambi gli algoritmi.
+# p99 (thick line) + p50 (light dashed) for both algorithms.
 ax.plot(rr_c, rr99, color=COLOR_RR, lw=2.4, marker="^", markersize=5,
         label="RR  p99")
 ax.plot(pr_c, pr99, color=COLOR_PREQUAL, lw=2.4, marker="^", markersize=5,
@@ -186,7 +187,7 @@ ax.set_xlim(0, PERIOD)
 ax.grid(True, which="both", linestyle="--", alpha=0.35)
 ax.legend(fontsize=9, loc="upper right", ncol=2, framealpha=0.9)
 
-# Riquadro metriche
+# Metrics box
 def fmt(x):
     return "—" if (x is None or (isinstance(x, float) and np.isnan(x))) else f"{x:.0f}"
 peak_ratio = rr_peak / pr_peak if (pr_peak and not np.isnan(pr_peak) and pr_peak > 0) else float("nan")
@@ -207,7 +208,7 @@ out_path = os.path.join(results_dir, "shock_response.png")
 plt.savefig(out_path, dpi=150, bbox_inches="tight")
 print(f"Saved → {out_path}")
 
-# ── Riepilogo a console (utile per il sweep di NHOT → regime 'no escape') ──────
+# ── Console summary (useful for the NHOT sweep → 'no escape' regime) ──────────
 print()
 print(f"NHOT={NHOT}/10  base={BASE}x  shock_load={SHOCK}  periodo={PERIOD}s  HOT_reale={HOT:.1f}s (cfg {HOT_CFG:.0f}s)")
 print(f"  baseline p99:        Prequal {fmt(pr_base)} ms | RR {fmt(rr_base)} ms")

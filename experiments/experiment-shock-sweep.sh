@@ -1,23 +1,22 @@
 #!/bin/bash
-# experiment-shock-sweep.sh — Sweep di FRESCHEZZA del segnale per l'esperimento A.
+# experiment-shock-sweep.sh — Signal FRESHNESS sweep for experiment A.
 #
-# Esegue experiment-shock.sh a più valori di probe interval IN UN COLPO SOLO,
-# cambiando l'intervallo A RUNTIME via /admin/probe-interval (curl, niente SSH).
-# Tutti i punti condividono lo stesso shock (HOT/COOL/NHOT dai default di
-# experiment-shock.sh) e differiscono SOLO per la freschezza del segnale, così
-# il confronto è pulito.
+# Runs experiment-shock.sh at multiple probe interval values IN ONE GO,
+# changing the interval AT RUNTIME via /admin/probe-interval (curl, no SSH).
+# All points share the same shock (HOT/COOL/NHOT from experiment-shock.sh
+# defaults) and differ ONLY in signal freshness, so the comparison is clean.
 #
-# Richiede la build dell'LB con l'endpoint /admin/probe-interval (campo runtime
+# Requires the LB build with the /admin/probe-interval endpoint (runtime field
 # in balancer.go + handler in cmd/server/main.go).
 #
 # Usage: ./experiment-shock-sweep.sh [nhot]
-#   ./experiment-shock-sweep.sh           # intervalli 250ms 1s 2s, NHOT=6
+#   ./experiment-shock-sweep.sh           # intervals 250ms 1s 2s, NHOT=6
 #   INTERVALS="250ms 500ms 1s 2s 4s" ./experiment-shock-sweep.sh 6
 #
-# Variabili d'ambiente:
-#   INTERVALS   lista di probe interval da testare   (default "250ms 1s 2s")
-#   SETTLE      attesa dopo il cambio interval (s)    (default 8)
-# Tutte le env di experiment-shock.sh (HOT, COOL, BASE_LEVEL, ...) sono propagate.
+# Environment variables:
+#   INTERVALS   list of probe intervals to test        (default "250ms 1s 2s")
+#   SETTLE      wait after the interval change (s)     (default 8)
+# All experiment-shock.sh env vars (HOT, COOL, BASE_LEVEL, ...) are propagated.
 
 set -uo pipefail
 
@@ -36,7 +35,7 @@ echo "============================================="
 echo " NHOT: $NHOT | settle: ${SETTLE}s | shock: HOT=${HOT:-default} COOL=${COOL:-default}"
 echo
 
-# Verifica che gli endpoint runtime esistano (build aggiornata dell'LB).
+# Check that the runtime endpoints exist (up-to-date LB build).
 if ! curl -fsS "$LB1/admin/probe-interval" >/dev/null 2>&1; then
     echo "ERROR: $LB1 non espone /admin/probe-interval." >&2
     echo "       Serve la build dell'LB con i campi runtime (balancer.go) + handler." >&2
@@ -44,8 +43,8 @@ if ! curl -fsS "$LB1/admin/probe-interval" >/dev/null 2>&1; then
     exit 1
 fi
 
-# Sorgente RIF per TUTTO lo sweep (true = server-local, fedele al paper e
-# stale-abile dal probe; false = client-local real-time). Default: true.
+# RIF source for the WHOLE sweep (true = server-local, faithful to the paper
+# and can go stale between probes; false = client-local real-time). Default: true.
 USE_SERVER_RIF="${USE_SERVER_RIF:-true}"
 if curl -fsS "$LB1/admin/use-server-rif" >/dev/null 2>&1; then
     for lb in "${LBS[@]}"; do
@@ -66,7 +65,7 @@ for IV in $INTERVALS; do
     echo "#  Probe interval = $IV"
     echo "#############################################"
 
-    # 1. Imposta l'intervallo su ENTRAMBI gli LB.
+    # 1. Set the interval on BOTH LBs.
     for lb in "${LBS[@]}"; do
         if ! curl -fsS "${lb}/admin/probe-interval?d=${IV}" >/dev/null; then
             echo "ERROR: impossibile impostare probe-interval=$IV su $lb" >&2
@@ -74,11 +73,11 @@ for IV in $INTERVALS; do
         fi
     done
 
-    # 2. Attendi che il ticker si resetti (effetto al tick successivo) e che la
-    #    pool di probe si ristabilizzi al nuovo ritmo.
+    # 2. Wait for the ticker to reset (takes effect on the next tick) and for
+    #    the probe pool to re-stabilize at the new pace.
     sleep "$SETTLE"
 
-    # 3. Verifica il valore attivo su entrambi (deve combaciare).
+    # 3. Verify the active value on both (they must match).
     ok=1
     for lb in "${LBS[@]}"; do
         got=$(curl -fsS "${lb}/admin/probe-interval" | tr -d '[:space:]')
@@ -90,13 +89,13 @@ for IV in $INTERVALS; do
     fi
     echo
 
-    # 4. Lancia l'esperimento (usa i suoi default per HOT/COOL/DURATION/NHOT).
-    #    experiment-shock.sh legge il probe interval dall'LB e lo mette nel nome
-    #    cartella (_PI<iv>) e in meta.env, quindi i run restano distinguibili.
+    # 4. Launch the experiment (uses its defaults for HOT/COOL/DURATION/NHOT).
+    #    experiment-shock.sh reads the probe interval from the LB and puts it in
+    #    the directory name (_PI<iv>) and in meta.env, so runs stay distinguishable.
     "$SCRIPT_DIR/experiment-shock.sh" "${DURATION:-}" "$NHOT" \
         || { echo "ERRORE nel run a $IV" >&2; exit 1; }
 
-    # Ultima cartella prodotta per questo intervallo.
+    # Latest directory produced for this interval.
     LAST=$(ls -dt /tmp/results-shock-*_NHOT${NHOT}_PI* 2>/dev/null | head -1)
     [ -n "$LAST" ] && RESULT_DIRS+=("$LAST")
     echo

@@ -10,20 +10,20 @@
 #
 # Usage: ./run-experiment.sh [duration_per_step] [dynamic]   (default: 60, static)
 #
-# Esempi:
-#   ./run-experiment.sh          # 60s per step, antagonisti statici
-#   ./run-experiment.sh 60       # idem esplicito
-#   ./run-experiment.sh 60 dynamic   # antagonisti dinamici (cambiano ogni 10s)
+# Examples:
+#   ./run-experiment.sh          # 60s per step, static antagonists
+#   ./run-experiment.sh 60       # same, explicit
+#   ./run-experiment.sh 60 dynamic   # dynamic antagonists (change every 10s)
 #
-# Con "dynamic" viene avviato dynamic-antagonist.sh in background;
-# ad ogni step dell'esperimento i server cambiano carico ciclicamente,
-# rendendo più evidente la differenza tra Prequal e Round-Robin.
+# With "dynamic", dynamic-antagonist.sh is started in the background;
+# during each experiment step the servers cycle through load changes,
+# making the difference between Prequal and Round-Robin more visible.
 
 set -e
 
 DURATION="${1:-60}"
-DYNAMIC="${2:-}"          # se "dynamic", avvia il ciclo antagonista
-ANTAG_PID=""              # PID del processo antagonista (se avviato)
+DYNAMIC="${2:-}"          # if "dynamic", start the antagonist cycle
+ANTAG_PID=""              # PID of the antagonist process (if started)
 LB_PREQUAL="http://10.10.1.11:8080"
 LB_RR="http://10.10.1.12:8080"
 RESULTS_DIR="/tmp/results-$(date +%Y%m%d-%H%M%S)"
@@ -47,9 +47,9 @@ echo "Both LBs reachable."
 echo
 
 # ---------------------------------------------------------------------------
-# ANTAGONISTA DINAMICO (opzionale)
-# Avvia dynamic-antagonist.sh in background se richiesto.
-# Lo script cambia il carico dei backend ogni 10s chiamando /admin/load.
+# DYNAMIC ANTAGONIST (optional)
+# Starts dynamic-antagonist.sh in the background if requested.
+# The script changes the backend load every 10s by calling /admin/load.
 # ---------------------------------------------------------------------------
 if [ "$DYNAMIC" = "dynamic" ]; then
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -65,12 +65,12 @@ if [ "$DYNAMIC" = "dynamic" ]; then
     ANTAG_PID=$!
     echo "  PID antagonista: $ANTAG_PID"
     echo "  Log antagonista: $ANTAG_LOG"
-    sleep 3   # lascia tempo all'antagonista di applicare il primo stato
+    sleep 3   # give the antagonist time to apply the first state
     echo "  Antagonista attivo."
     echo
 fi
 
-# Registra cleanup: ferma l'antagonista e ripristina il carico base
+# Register cleanup: stop the antagonist and restore the baseline load
 cleanup() {
     if [ -n "$ANTAG_PID" ] && kill -0 "$ANTAG_PID" 2>/dev/null; then
         echo ""
@@ -128,11 +128,11 @@ for i in "${!LEVELS[@]}"; do
     CONC=1000
     QPS_PER_WORKER=$(awk -v q="$QPS" -v c="$CONC" 'BEGIN{printf "%.2f", q/c}')
 
-    # NB: niente "-t 1". Un timeout di 1s tronca la coda della distribuzione
-    # (p95/p99 leggono ~0.99s per entrambi) e gonfia il throughput, perché i
-    # worker abbandonano le richieste lente e ne sparano subito altre. È esatta-
-    # mente il segnale su cui Prequal vince (coda a 2-4s sotto overload) a venire
-    # cancellato. Default di hey = 20s, sufficiente.
+    # NB: no "-t 1". A 1s timeout truncates the tail of the distribution
+    # (p95/p99 read ~0.99s for both) and inflates throughput, because the
+    # workers abandon slow requests and immediately fire new ones. That
+    # erases exactly the signal Prequal wins on (2-4s tail under overload).
+    # hey's default = 20s, which is enough.
     hey -z "${DURATION}s" -q "$QPS_PER_WORKER" -c "$CONC" "$LB_PREQUAL" \
         > "$RESULTS_DIR/prequal_${NAME}.txt" 2>&1 &
     PID_P=$!

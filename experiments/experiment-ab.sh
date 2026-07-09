@@ -1,36 +1,37 @@
 #!/bin/bash
-# experiment-ab.sh — A/B PULITO in due passate, senza contaminazione.
+# experiment-ab.sh — CLEAN A/B in two passes, with no contamination.
 #
-# IDEA (vedi discussione):
-#   Invece di tenere accesi lb-prequal e lb-rr CONTEMPORANEAMENTE sugli stessi
-#   backend (i due algoritmi si pestano: Prequal manda al server scarico mentre
-#   RR lo inonda → il segnale di Prequal viene cancellato), facciamo DUE passate
-#   separate, mettendo ENTRAMBI gli LB sullo stesso algoritmo via endpoint:
+# IDEA (see discussion):
+#   Instead of keeping lb-prequal and lb-rr running SIMULTANEOUSLY on the same
+#   backends (the two algorithms step on each other: Prequal routes to the idle
+#   server while RR floods it → Prequal's signal gets erased), we run TWO
+#   separate passes, setting BOTH LBs to the same algorithm via endpoint:
 #
-#     Passata 1:  .11 = prequal,  .12 = prequal   (flotta tutta-Prequal)
-#     Passata 2:  .11 = rr,       .12 = rr        (flotta tutta-RR)
+#     Pass 1:  .11 = prequal,  .12 = prequal   (all-Prequal fleet)
+#     Pass 2:  .11 = rr,       .12 = rr        (all-RR fleet)
 #
-#   Dentro una passata il routing è OMOGENEO → niente contaminazione.
-#   Si confronta poi Passata 1 vs Passata 2. È un vero A/B: stessi backend,
-#   stesso antagonista, stesso carico; cambia solo l'algoritmo.
+#   Within a pass the routing is HOMOGENEOUS → no contamination.
+#   Pass 1 is then compared against Pass 2. It's a true A/B: same backends,
+#   same antagonist, same load; only the algorithm changes.
 #
-# L'algoritmo si cambia a runtime con /admin/algorithm?algo=prequal|rr
-# (cmd/server/main.go:117) → niente redeploy tra le due passate.
+# The algorithm is switched at runtime with /admin/algorithm?algo=prequal|rr
+# (cmd/server/main.go:117) → no redeploy between the two passes.
 #
 # -----------------------------------------------------------------------------
-# PREREQUISITO IMPORTANTE (per un confronto equo a favore di Prequal):
-#   Gli LB dovrebbero girare con  LB_USE_SERVER_RIF=true  (env al boot,
-#   cloudlab-setup.sh:99). Con due LB Prequal in parallelo e USE_SERVER_RIF=false
-#   ogni LB conta solo il PROPRIO in-flight per server e non vede l'altro LB →
-#   possono scegliere lo stesso server "scarico" e sovraccaricarlo insieme
-#   (effetto gregge multi-LB). Con true ogni LB legge il RIF TOTALE riportato dal
-#   backend (X-Server-RIF) e il segnale è completo. RR non ne risente.
-#   Questo script NON può cambiarlo a runtime (è un env): verificalo prima.
+# IMPORTANT PREREQUISITE (for a comparison that is fair to Prequal):
+#   The LBs should run with  LB_USE_SERVER_RIF=true  (env at boot,
+#   cloudlab-setup.sh:99). With two Prequal LBs in parallel and
+#   USE_SERVER_RIF=false, each LB only counts its OWN in-flight per server and
+#   cannot see the other LB → they can both pick the same "idle" server and
+#   overload it together (multi-LB herd effect). With true, each LB reads the
+#   TOTAL RIF reported by the backend (X-Server-RIF) and the signal is
+#   complete. RR is unaffected.
+#   This script CANNOT change it at runtime (it's an env var): verify it first.
 # -----------------------------------------------------------------------------
 #
 # Usage: ./experiment-ab.sh [duration_per_step] [static|dynamic]
-#   ./experiment-ab.sh              # 60s/step, antagonista STATICO eterogeneo
-#   ./experiment-ab.sh 60 dynamic   # 60s/step, antagonista DINAMICO ciclico
+#   ./experiment-ab.sh              # 60s/step, heterogeneous STATIC antagonist
+#   ./experiment-ab.sh 60 dynamic   # 60s/step, cyclic DYNAMIC antagonist
 
 set -uo pipefail
 
@@ -42,21 +43,21 @@ LB1="http://10.10.1.11:8080"
 LB2="http://10.10.1.12:8080"
 LBS=("$LB1" "$LB2")
 
-# Backend server-0..9 → 10.10.1.21..30
+# Backends server-0..9 → 10.10.1.21..30
 BACKENDS=(10.10.1.21 10.10.1.22 10.10.1.23 10.10.1.24 10.10.1.25
           10.10.1.26 10.10.1.27 10.10.1.28 10.10.1.29 10.10.1.30)
 
-# Profilo STATICO minoranza-carico: solo 3 server pesanti (350), 7 puliti (0),
-# così Prequal ha sempre abbondante capacità dove dirottare. (cpu_load s0..s9)
-# È lo scenario del paper: pochi antagonisti in mezzo a tante repliche sane.
+# Minority-load STATIC profile: only 3 heavy servers (350), 7 clean (0),
+# so Prequal always has plenty of capacity to divert to. (cpu_load s0..s9)
+# This is the paper's scenario: a few antagonists among many healthy replicas.
 STATIC_LOADS=(350 350 350 0 0 0 0 0 0 0)
 
-CONC=1000                          # connessioni per LB
+CONC=1000                          # connections per LB
 LEVELS=(0.75 0.83 0.93 1.03 1.14 1.27 1.41 1.57 1.74)
 NAMES=("75pct" "83pct" "93pct" "103pct" "114pct" "127pct" "141pct" "157pct" "174pct")
 
 RESULTS_DIR="/tmp/results-ab-$(date +%Y%m%d-%H%M%S)"
-mkdir -p "$RESULTS_DIR/_lb2"       # _lb2/ = output del secondo LB (carico di flotta, non parsato)
+mkdir -p "$RESULTS_DIR/_lb2"       # _lb2/ = second LB's output (fleet load, not parsed)
 
 ANTAG_PID=""
 ANTAG_LOG=""
@@ -85,7 +86,7 @@ echo
 # Helper
 # ---------------------------------------------------------------------------
 
-# Imposta lo stesso algoritmo su ENTRAMBI gli LB.
+# Set the same algorithm on BOTH LBs.
 set_algo() {
     local algo="$1"
     for lb in "${LBS[@]}"; do
@@ -97,7 +98,7 @@ set_algo() {
     echo "  → algoritmo impostato a '$algo' su tutti gli LB"
 }
 
-# Applica il profilo statico eterogeneo ai backend (modalità static).
+# Apply the heterogeneous static profile to the backends (static mode).
 apply_static_profile() {
     echo "  → applico profilo statico: ${STATIC_LOADS[*]}"
     local pids=()
@@ -110,9 +111,9 @@ apply_static_profile() {
     wait "${pids[@]}" 2>/dev/null || true
 }
 
-# Avvia l'antagonista dinamico (modalità dynamic), con ciclo allineato allo step:
-# 6 stati × INTERVAL = DURATION  →  ogni step copre esattamente un ciclo intero,
-# così Prequal e RR vedono la stessa media di condizioni.
+# Start the dynamic antagonist (dynamic mode), with the cycle aligned to the step:
+# 6 states × INTERVAL = DURATION  →  each step covers exactly one full cycle,
+# so Prequal and RR see the same average conditions.
 start_antagonist() {
     local antag="$SCRIPT_DIR/dynamic-antagonist.sh"
     if [ ! -x "$antag" ]; then
@@ -125,7 +126,7 @@ start_antagonist() {
     echo "  → avvio antagonista dinamico (INTERVAL=${interval}s, ciclo=$((interval*6))s)"
     ANTAG_INTERVAL="$interval" ANTAG_LOG="$ANTAG_LOG" "$antag" &
     ANTAG_PID=$!
-    sleep 3   # lascia applicare il primo stato
+    sleep 3   # let it apply the first state
 }
 
 stop_antagonist() {
@@ -141,14 +142,14 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# Estrae "Requests/sec" da un file hey.
+# Extract "Requests/sec" from a hey output file.
 req_per_sec() {
     grep -E "^[[:space:]]*Requests/sec:" "$1" 2>/dev/null | awk '{print $2}' | head -1
 }
 
 # ---------------------------------------------------------------------------
-# Setup condizioni backend UNA VOLTA SOLA (valgono per discovery + entrambe le
-# passate, così l'A/B è equo).
+# Set up the backend conditions ONCE (they hold for discovery + both passes,
+# so the A/B is fair).
 # ---------------------------------------------------------------------------
 if [ "$MODE" = "dynamic" ]; then
     start_antagonist
@@ -158,14 +159,14 @@ fi
 echo
 
 # ---------------------------------------------------------------------------
-# Saturation discovery — UNA SOLA VOLTA, riferimento comune ai due algoritmi.
-# Misuriamo il soffitto con entrambi gli LB su RR (baseline conservativa); i
-# livelli percentuali sono quindi relativi alla saturazione di RR. Prequal sopra
-# il 100% è la zona dove deve staccarsi.
+# Saturation discovery — ONCE ONLY, common reference for both algorithms.
+# We measure the ceiling with both LBs on RR (conservative baseline); the
+# percentage levels are therefore relative to RR's saturation. Above 100% is
+# the zone where Prequal must pull ahead.
 # ---------------------------------------------------------------------------
 echo "--- Saturation discovery (20s, uncapped, c=200, riferimento=RR) ---"
 set_algo rr
-sleep 5   # warm-up: lascia stabilizzare probe/soglia
+sleep 5   # warm-up: let probes/threshold stabilize
 hey -z 20s -c 200 "$LB1" > "$RESULTS_DIR/saturation_ref.txt"      2>&1 &
 P1=$!
 hey -z 20s -c 200 "$LB2" > "$RESULTS_DIR/_lb2/saturation_ref.txt" 2>&1 &
@@ -181,16 +182,16 @@ if [ -z "$SAT_INT" ] || [ "$SAT_INT" -lt 100 ]; then
 fi
 echo
 
-# Pre-calcola il QPS assoluto per ogni livello (uguale per entrambe le passate).
+# Pre-compute the absolute QPS for each level (same for both passes).
 QPS_TARGETS=()
 for LEVEL in "${LEVELS[@]}"; do
     QPS_TARGETS+=( "$(awk -v s="$SAT_INT" -v l="$LEVEL" 'BEGIN{printf "%.0f", s*l}')" )
 done
 
 # ---------------------------------------------------------------------------
-# Una passata completa: imposta l'algoritmo su entrambi gli LB e fa il ramp.
-# Il file CANONICO (parsato) è quello di LB1; LB2 fornisce la seconda metà del
-# carico di flotta (output in _lb2/, ignorato da parse-results.sh).
+# One full pass: sets the algorithm on both LBs and runs the ramp.
+# The CANONICAL (parsed) file is LB1's; LB2 provides the second half of the
+# fleet load (output in _lb2/, ignored by parse-results.sh).
 # ---------------------------------------------------------------------------
 run_pass() {
     local ALGO="$1"
@@ -198,7 +199,7 @@ run_pass() {
     echo "#  PASSATA: ${ALGO}  (entrambi gli LB)"
     echo "#############################################"
     set_algo "$ALGO"
-    sleep 5   # warm-up dopo lo switch: la soglia RIF si ricalcola al probe successivo
+    sleep 5   # warm-up after the switch: the RIF threshold is recomputed on the next probe
     echo
 
     for i in "${!LEVELS[@]}"; do
@@ -209,8 +210,8 @@ run_pass() {
 
         echo "=== [$ALGO] Step $((i+1))/${#LEVELS[@]} — $NAME (target ${QPS} req/s per LB) ==="
 
-        # NB: niente "-t": un timeout tronca la coda (il segnale su cui Prequal
-        # vince vive a 2-4s sotto overload) e gonfia/pareggia il throughput.
+        # NB: no "-t": a timeout truncates the tail (the signal Prequal wins
+        # on lives at 2-4s under overload) and inflates/evens out throughput.
         hey -z "${DURATION}s" -q "$QPS_PER_WORKER" -c "$CONC" "$LB1" \
             > "$RESULTS_DIR/${ALGO}_${NAME}.txt"     2>&1 &
         local PID1=$!
@@ -228,7 +229,7 @@ run_pass() {
 }
 
 # ---------------------------------------------------------------------------
-# Le due passate
+# The two passes
 # ---------------------------------------------------------------------------
 run_pass prequal
 
@@ -238,7 +239,7 @@ sleep 10
 run_pass rr
 
 # ---------------------------------------------------------------------------
-# Riepilogo
+# Summary
 # ---------------------------------------------------------------------------
 echo "============================================="
 echo "Esperimento A/B completo. Risultati in: $RESULTS_DIR"

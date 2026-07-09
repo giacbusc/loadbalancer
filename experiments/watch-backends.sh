@@ -1,26 +1,26 @@
 #!/bin/bash
-# watch-backends.sh — Tabella live del carico su tutti i backend.
+# watch-backends.sh — Live table of the load on all backends.
 #
-# Interroga /health su tutti e 10 i server in parallelo e mostra
-# cpu_load, burners attivi, latenza p50, RIF e stato di salute.
-# Ottimo per verificare che dynamic-antagonist.sh stia funzionando
-# PRIMA di lanciare l'esperimento.
+# Queries /health on all 10 servers in parallel and shows
+# cpu_load, active burners, p50 latency, RIF and health status.
+# Great for verifying that dynamic-antagonist.sh is working
+# BEFORE launching the experiment.
 #
-# UTILIZZO:
-#   ./watch-backends.sh              # refresh ogni 4s (default)
-#   WATCH_INTERVAL=2 ./watch-backends.sh   # refresh più veloce
+# USAGE:
+#   ./watch-backends.sh              # refresh every 4s (default)
+#   WATCH_INTERVAL=2 ./watch-backends.sh   # faster refresh
 #
-# WORKFLOW TIPICO (due terminali su loadgen-0):
-#   [terminale 1]  ./dynamic-antagonist.sh
-#   [terminale 2]  ./watch-backends.sh
-#   ... verifica visiva che i carichi cambino ogni 10s ...
-#   [terminale 1]  Ctrl+C
-#   [terminale 1]  ./run-experiment.sh 60 dynamic
+# TYPICAL WORKFLOW (two terminals on loadgen-0):
+#   [terminal 1]  ./dynamic-antagonist.sh
+#   [terminal 2]  ./watch-backends.sh
+#   ... visually check that the loads change every 10s ...
+#   [terminal 1]  Ctrl+C
+#   [terminal 1]  ./run-experiment.sh 60 dynamic
 
 INTERVAL="${WATCH_INTERVAL:-4}"
 PORT=8080
 
-# Server: IP e etichetta (H=heavy, M=medium, C=clean — ruolo originale)
+# Servers: IP and label (H=heavy, M=medium, C=clean — original role)
 declare -a IPS=(
     "10.10.1.21" "10.10.1.22" "10.10.1.23" "10.10.1.24"
     "10.10.1.25" "10.10.1.26" "10.10.1.27"
@@ -33,7 +33,7 @@ declare -a LABELS=(
 )
 
 # ---------------------------------------------------------------------------
-# Colori ANSI
+# ANSI colors
 # ---------------------------------------------------------------------------
 RED='\033[0;31m'
 YELLOW='\033[0;33m'
@@ -64,13 +64,13 @@ load_label() {
 }
 
 # ---------------------------------------------------------------------------
-# Directory temporanea per le risposte curl (pulizia automatica all'uscita)
+# Temporary directory for curl responses (automatically cleaned up on exit)
 # ---------------------------------------------------------------------------
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 # ---------------------------------------------------------------------------
-# Fetch tutti i backend in parallelo
+# Fetch all backends in parallel
 # ---------------------------------------------------------------------------
 fetch_all() {
     local pids=()
@@ -86,7 +86,7 @@ fetch_all() {
 }
 
 # ---------------------------------------------------------------------------
-# Trova il log dell'antagonista più recente
+# Find the most recent antagonist log
 # ---------------------------------------------------------------------------
 latest_antag_log() {
     ls -t /tmp/antagonist-*.log 2>/dev/null | head -1
@@ -106,12 +106,12 @@ while true; do
            "$(date '+%H:%M:%S')" "$INTERVAL"
     echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 
-    # ── Colonne ─────────────────────────────────────────────────────────────
+    # ── Columns ─────────────────────────────────────────────────────────────
     printf "${BOLD}  %-14s  %5s  %-8s  %4s  %9s  %5s${RESET}\n" \
            "SERVER" "LOAD" "STATO" "BRN" "p50 (ms)" "RIF"
     echo -e "  ─────────────────────────────────────────────────────"
 
-    # ── Righe backend ───────────────────────────────────────────────────────
+    # ── Backend rows ────────────────────────────────────────────────────────
     for i in "${!IPS[@]}"; do
         label="${LABELS[$i]}"
         jf="$TMP_DIR/$i.json"
@@ -121,7 +121,7 @@ while true; do
             rif=$(     jq -r '.rif      // 0'  "$jf" 2>/dev/null || echo "0")
             p50_us=$(  jq -r '.p50_us   // 0'  "$jf" 2>/dev/null || echo "0")
 
-            # Converti microsecondi → millisecondi con una cifra decimale
+            # Convert microseconds → milliseconds with one decimal digit
             p50_ms=$(awk -v us="$p50_us" 'BEGIN{printf "%.1f", us/1000}')
             burners=$(( cpu_load / 50 ))
             state_lbl=$(load_label "$cpu_load")
@@ -134,7 +134,7 @@ while true; do
                    "$label" "?" "OFFLINE" "?" "?" "?"
         fi
 
-        # Separatore visivo tra i tre gruppi (H/M/C)
+        # Visual separator between the three groups (H/M/C)
         if [[ $i -eq 3 ]] || [[ $i -eq 6 ]]; then
             echo -e "  ─────────────────────────────────────────────────────"
         fi
@@ -142,10 +142,10 @@ while true; do
 
     echo -e "  ─────────────────────────────────────────────────────"
 
-    # ── Legenda colori ──────────────────────────────────────────────────────
+    # ── Color legend ────────────────────────────────────────────────────────
     echo -e "  ${RED}■ HEAVY ≥300${RESET}  ${YELLOW}■ MEDIUM ≥150${RESET}  ${CYAN}■ LIGHT >0${RESET}  ${GREEN}■ CLEAN =0${RESET}"
 
-    # ── Ultimo evento antagonista ────────────────────────────────────────────
+    # ── Latest antagonist event ─────────────────────────────────────────────
     echo ""
     antag_log=$(latest_antag_log)
     if [[ -n "$antag_log" ]]; then

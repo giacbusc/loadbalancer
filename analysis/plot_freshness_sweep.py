@@ -1,26 +1,29 @@
 #!/usr/bin/env python3
 """
-plot_freshness_sweep.py — Sweep di FRESCHEZZA del segnale (esperimento A, secondario).
+plot_freshness_sweep.py — Signal FRESHNESS sweep (experiment A, secondary).
 
-Domanda: il vantaggio transitorio di Prequal dipende da QUANTO è fresco il segnale
-di carico? Per misurarlo si esegue lo stesso shock (experiment-shock.sh) a più
-probe interval e si confronta il rapporto RR/Prequal della p99 durante lo shock.
+Question: does Prequal's transient advantage depend on HOW fresh the load
+signal is? To measure it, the same shock (experiment-shock.sh) is run at
+several probe intervals and the RR/Prequal ratio of the p99 during the shock
+is compared.
 
-SETUP (use_server_rif=false, RIF client-local): il RIF — segnale dominante di HCL —
-è tenuto in TEMPO REALE dall'LB, quindi resta sempre fresco a prescindere dal probe
-interval. Variare il probe interval isola quindi l'effetto della staleness della SOLA
-latenza (e della soglia RIF), tenendo fisso il segnale di carico. È il test giusto per
-la ROBUSTEZZA: se il vantaggio transitorio di Prequal NON crolla allungando il probe
-interval, significa che la policy non dipende da un probing frequente — si può ridurre
-l'overhead di probing senza perdere il vantaggio.
+SETUP (use_server_rif=false, client-local RIF): the RIF — HCL's dominant
+signal — is kept in REAL TIME by the LB, so it always stays fresh regardless
+of the probe interval. Varying the probe interval therefore isolates the
+staleness effect of the latency ALONE (and of the RIF threshold), keeping the
+load signal fixed. It's the right test for ROBUSTNESS: if Prequal's transient
+advantage does NOT collapse as the probe interval grows, the policy doesn't
+depend on frequent probing — probing overhead can be reduced without losing
+the advantage.
 
-Lo script annota nel titolo la sorgente RIF attiva così la figura è auto-documentante.
+The script annotates the active RIF source in the title so the figure is
+self-documenting.
 
 Usage:
   python3 plot_freshness_sweep.py DIR1 DIR2 DIR3 ...
-  python3 plot_freshness_sweep.py "/tmp/results-shock-*_NHOT6_PI*"   # glob (tra apici)
+  python3 plot_freshness_sweep.py "/tmp/results-shock-*_NHOT6_PI*"   # glob (quoted)
 
-Output: freshness_sweep.png nella cwd (o --out PATH).
+Output: freshness_sweep.png in the cwd (or --out PATH).
 """
 
 import sys

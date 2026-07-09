@@ -1,44 +1,45 @@
 #!/bin/bash
-# experiment-shock.sh — RISPOSTA TRANSITORIA a uno shock correlato (esperimento A).
+# experiment-shock.sh — TRANSIENT RESPONSE to a correlated shock (experiment A).
 #
-# MOTIVAZIONE (further exploration, va OLTRE il paper):
-#   Tutti gli esperimenti del paper (e i nostri finora) misurano il sistema a
-#   REGIME: un punto di equilibrio per ogni livello di carico, tail-latency vs
-#   load. Il paper non guarda MAI il DOMINIO DEL TEMPO:
-#     1. quanto velocemente ciascuna policy REAGISCE a uno shock improvviso, e
-#     2. quanto tempo ci mette a RECUPERARE dopo che lo shock finisce.
-#   Inoltre il paper assume sempre l'esistenza di una "maggioranza fredda" su cui
-#   Prequal può dirottare. Qui colpiamo NHOT backend su 10 CONTEMPORANEAMENTE (uno
-#   shock CORRELATO, non i nostri antagonisti indipendenti) e, variando NHOT,
-#   troviamo il punto in cui quella maggioranza fredda sparisce e il vantaggio di
-#   Prequal svanisce ("no escape" regime).
+# MOTIVATION (further exploration, goes BEYOND the paper):
+#   All the paper's experiments (and ours so far) measure the system at
+#   STEADY STATE: one equilibrium point per load level, tail-latency vs
+#   load. The paper NEVER looks at the TIME DOMAIN:
+#     1. how quickly each policy REACTS to a sudden shock, and
+#     2. how long it takes to RECOVER after the shock ends.
+#   Moreover, the paper always assumes the existence of a "cold majority" that
+#   Prequal can divert to. Here we hit NHOT out of 10 backends SIMULTANEOUSLY
+#   (a CORRELATED shock, not our independent antagonists) and, by varying NHOT,
+#   we find the point where that cold majority disappears and Prequal's
+#   advantage vanishes (the "no escape" regime).
 #
-# COME (senza stravolgere nulla):
-#   - Carico COSTANTE (BASE_LEVEL × saturazione) per tutta la passata, come in
-#     experiment-ab.sh, con discovery di saturazione una volta sola su RR.
-#   - Onda quadra di antagonista: WARMUP, poi ON (NHOT backend a SHOCK_LOAD) per
-#     HOT secondi, OFF (tutti puliti) per COOL secondi, ripetuto NCYCLES volte.
-#     Ogni ciclo è un evento di shock ripetuto → ensemble averaging in plot.
-#   - hey viene lanciato con "-o csv": dà OGNI richiesta con (response-time,offset)
-#     così plot_shock.py può binnare a 0.5s e ricostruire p99(t). L'aggregato dei
-#     60s di hey, da solo, spalmerebbe il transitorio e lo renderebbe invisibile.
-#   - A/B in due passate identiche (tutta-Prequal, tutta-RR) come experiment-ab.sh,
-#     via /admin/algorithm a runtime: stesso schedule di shock, cambia solo l'algo.
+# HOW (without changing anything major):
+#   - CONSTANT load (BASE_LEVEL × saturation) for the whole pass, as in
+#     experiment-ab.sh, with saturation discovery done once on RR.
+#   - Antagonist square wave: WARMUP, then ON (NHOT backends at SHOCK_LOAD) for
+#     HOT seconds, OFF (all clean) for COOL seconds, repeated NCYCLES times.
+#     Each cycle is a repeated shock event → ensemble averaging in the plot.
+#   - hey is launched with "-o csv": it reports EVERY request with
+#     (response-time, offset) so plot_shock.py can bin at 0.5s and reconstruct
+#     p99(t). hey's 60s aggregate alone would smear out the transient and make
+#     it invisible.
+#   - A/B in two identical passes (all-Prequal, all-RR) as in experiment-ab.sh,
+#     via /admin/algorithm at runtime: same shock schedule, only the algo changes.
 #
 # Usage: ./experiment-shock.sh [duration_per_pass] [nhot]
-#   ./experiment-shock.sh                 # 108s/passata (8 cicli), 6 backend colpiti
-#   ./experiment-shock.sh 108 4           # 108s/passata, 4 backend colpiti
-#   NHOT sweep (regime "no escape"):
+#   ./experiment-shock.sh                 # 108s/pass (8 cycles), 6 backends hit
+#   ./experiment-shock.sh 108 4           # 108s/pass, 4 backends hit
+#   NHOT sweep ("no escape" regime):
 #   for n in 2 4 6 8; do ./experiment-shock.sh 108 $n; done
-#   Shock lungo (vecchio default): HOT=8 COOL=12 ./experiment-shock.sh 180 6
+#   Long shock (old default): HOT=8 COOL=12 ./experiment-shock.sh 180 6
 #
-# Variabili d'ambiente (override opzionale):
-#   BASE_LEVEL  carico costante in frazione di saturazione        (default 1.00)
-#   HOT         secondi di shock ON  (shock corto per isolare il lag)  (default 3)
-#   COOL        secondi di recupero OFF                            (default 9)
-#   WARMUP      secondi prima del primo shock                      (default 12)
-#   SHOCK_LOAD  cpu_load applicato ai backend colpiti             (default 350)
-#   CONC        connessioni per LB                                (default 1000)
+# Environment variables (optional overrides):
+#   BASE_LEVEL  constant load as a fraction of saturation          (default 1.00)
+#   HOT         seconds of shock ON (short shock to isolate the lag)   (default 3)
+#   COOL        seconds of recovery OFF                             (default 9)
+#   WARMUP      seconds before the first shock                      (default 12)
+#   SHOCK_LOAD  cpu_load applied to the backends being hit          (default 350)
+#   CONC        connections per LB                                  (default 1000)
 
 set -uo pipefail
 
@@ -57,7 +58,7 @@ LB1="http://10.10.1.11:8080"
 LB2="http://10.10.1.12:8080"
 LBS=("$LB1" "$LB2")
 
-# Backend server-0..9 → 10.10.1.21..30 (stessi di experiment-ab.sh)
+# Backends server-0..9 → 10.10.1.21..30 (same as experiment-ab.sh)
 BACKENDS=(10.10.1.21 10.10.1.22 10.10.1.23 10.10.1.24 10.10.1.25
           10.10.1.26 10.10.1.27 10.10.1.28 10.10.1.29 10.10.1.30)
 
@@ -67,7 +68,7 @@ NCYCLES=$(awk -v d="$DURATION" -v w="$WARMUP" -v p="$PERIOD" 'BEGIN{printf "%d",
 RESULTS_DIR="/tmp/results-shock-$(date +%Y%m%d-%H%M%S)_NHOT${NHOT}"
 mkdir -p "$RESULTS_DIR/_lb2"
 
-T0=""   # impostato per-passata appena prima di lanciare hey
+T0=""   # set per-pass right before launching hey
 
 echo "============================================="
 echo " Shock transitorio — Prequal vs RR (esperimento A)"
@@ -93,12 +94,12 @@ for lb in "${LBS[@]}"; do
 done
 echo "Entrambi gli LB raggiungibili."
 
-# Probe interval ATTIVO letto dall'LB (GET /admin/probe-interval), così la
-# cartella e meta.env sono auto-documentanti per lo sweep di freschezza.
-# Se l'LB è una build vecchia senza endpoint, ripiega su "unknown".
+# ACTIVE probe interval read from the LB (GET /admin/probe-interval), so the
+# directory and meta.env are self-documenting for the freshness sweep.
+# If the LB is an old build without the endpoint, fall back to "unknown".
 PROBE_IV=$(curl -fsS "$LB1/admin/probe-interval" 2>/dev/null | tr -d '[:space:]')
 [ -z "$PROBE_IV" ] && PROBE_IV="unknown"
-# Sorgente RIF attiva: true = server-local (probe, stale-abile), false = client-local (real-time).
+# Active RIF source: true = server-local (probed, can go stale), false = client-local (real-time).
 RIF_SRC=$(curl -fsS "$LB1/admin/use-server-rif" 2>/dev/null | tr -d '[:space:]')
 [ -z "$RIF_SRC" ] && RIF_SRC="unknown"
 RIF_TAG="srv"; [ "$RIF_SRC" = "false" ] && RIF_TAG="loc"
@@ -109,7 +110,7 @@ echo "Results dir: $RESULTS_DIR"
 echo
 
 # ---------------------------------------------------------------------------
-# Helper (stessi di experiment-ab.sh)
+# Helpers (same as experiment-ab.sh)
 # ---------------------------------------------------------------------------
 set_algo() {
     local algo="$1"
@@ -126,7 +127,7 @@ req_per_sec() {
     grep -E "^[[:space:]]*Requests/sec:" "$1" 2>/dev/null | awk '{print $2}' | head -1
 }
 
-# Porta TUTTI i backend a cpu_load=0 (in parallelo).
+# Bring ALL backends to cpu_load=0 (in parallel).
 reset_clean() {
     local pids=()
     for ip in "${BACKENDS[@]}"; do
@@ -136,7 +137,7 @@ reset_clean() {
     wait "${pids[@]}" 2>/dev/null || true
 }
 
-# Applica un valore di cpu_load ai PRIMI NHOT backend (in parallelo).
+# Apply a cpu_load value to the FIRST NHOT backends (in parallel).
 shock_set() {
     local val="$1"; local pids=()
     local i
@@ -148,7 +149,7 @@ shock_set() {
     wait "${pids[@]}" 2>/dev/null || true
 }
 
-# Registra un fronte (ON/OFF) col tempo trascorso da T0 (= istante di start di hey).
+# Log an edge (ON/OFF) with the time elapsed since T0 (= hey's start instant).
 log_edge() {
     local ev="$1"; local edgelog="$2"; local now
     now=$(date +%s.%N)
@@ -161,7 +162,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # ---------------------------------------------------------------------------
-# Saturation discovery — UNA SOLA VOLTA, su RR (riferimento comune).
+# Saturation discovery — ONCE ONLY, on RR (common reference).
 # ---------------------------------------------------------------------------
 echo "--- Saturation discovery (20s, uncapped, c=200, riferimento=RR) ---"
 set_algo rr
@@ -186,7 +187,7 @@ QPS_PER_WORKER=$(awk -v q="$QPS" -v c="$CONC" 'BEGIN{printf "%.4f", q/c}')
 echo "Carico base costante: ${QPS} req/s per LB (${BASE_LEVEL}× saturazione)"
 echo
 
-# Metadati per il plotter (lettura key=value).
+# Metadata for the plotter (read as key=value).
 cat > "$RESULTS_DIR/meta.env" <<EOF
 period=$PERIOD
 hot=$HOT
@@ -203,8 +204,8 @@ use_server_rif=$RIF_SRC
 EOF
 
 # ---------------------------------------------------------------------------
-# Una passata: imposta l'algoritmo, lancia hey a carico costante con -o csv,
-# e in parallelo guida l'onda quadra di shock loggando i fronti.
+# One pass: sets the algorithm, launches hey at constant load with -o csv,
+# and in parallel drives the shock square wave, logging the edges.
 # ---------------------------------------------------------------------------
 run_pass() {
     local ALGO="$1"
@@ -212,26 +213,26 @@ run_pass() {
     echo "#  PASSATA: ${ALGO}  (entrambi gli LB)"
     echo "#############################################"
     set_algo "$ALGO"
-    sleep 5            # warm-up dopo lo switch: la soglia RIF si ricalcola al probe successivo
+    sleep 5            # warm-up after the switch: the RIF threshold is recomputed on the next probe
     reset_clean
     sleep 2
 
     local edgelog="$RESULTS_DIR/${ALGO}_edges.log"
     : > "$edgelog"
 
-    # T0 = istante di start di hey; gli offset di hey -o csv sono relativi a qui.
+    # T0 = hey's start instant; the offsets in hey -o csv are relative to this.
     T0=$(date +%s.%N)
 
-    # LB canonico (.11) → CSV per-richiesta (parsato da plot_shock.py).
+    # Canonical LB (.11) → per-request CSV (parsed by plot_shock.py).
     hey -z "${DURATION}s" -q "$QPS_PER_WORKER" -c "$CONC" -o csv "$LB1" \
         > "$RESULTS_DIR/${ALGO}.csv" 2>"$RESULTS_DIR/${ALGO}.err" &
     local HPID=$!
-    # LB co-load (.12) → seconda metà del carico di flotta (output ignorato).
+    # Co-load LB (.12) → second half of the fleet load (output ignored).
     hey -z "${DURATION}s" -q "$QPS_PER_WORKER" -c "$CONC" "$LB2" \
         > "$RESULTS_DIR/_lb2/${ALGO}.txt" 2>&1 &
     local HPID2=$!
 
-    # Onda quadra di shock, sincronizzata con hey via T0.
+    # Shock square wave, synchronized with hey via T0.
     (
         sleep "$WARMUP"
         local k
@@ -254,7 +255,7 @@ run_pass() {
 }
 
 # ---------------------------------------------------------------------------
-# Le due passate
+# The two passes
 # ---------------------------------------------------------------------------
 run_pass prequal
 
