@@ -2,38 +2,38 @@
 # dynamic-antagonist.sh — Rotate backend CPU loads every INTERVAL seconds.
 #
 # WHY:
-#   Un antagonista statico testa Prequal vs RR in un solo punto operativo.
-#   Con antagonisti dinamici il paesaggio di capacità cambia nel tempo:
-#     - Server che erano lenti si "riprendono" improvvisamente
-#     - Server clean diventano contesi
-#   Prequal re-campiona la latenza ad ogni probe → si adatta in pochi secondi.
-#   Round-Robin ignora lo stato dei server → continua a mandare traffico
-#   ai server lenti anche dopo che sono tornati clean (e viceversa).
-#   Questo amplifica la differenza osservabile tra i due algoritmi.
+#   A static antagonist tests Prequal vs RR at a single operating point.
+#   With dynamic antagonists the capacity landscape changes over time:
+#     - Servers that were slow suddenly "recover"
+#     - Clean servers become contended
+#   Prequal re-samples latency on every probe → it adapts within seconds.
+#   Round-Robin ignores server state → it keeps sending traffic to slow
+#   servers even after they have become clean again (and vice versa).
+#   This amplifies the observable difference between the two algorithms.
 #
-# COME FUNZIONA (senza riavviare Docker):
-#   Il backend espone già /admin/load?cpu=VALUE (backend/main.go:255).
-#   Questo script chiama quell'endpoint su tutti i server in parallelo con curl.
+# HOW IT WORKS (no Docker restart needed):
+#   The backend already exposes /admin/load?cpu=VALUE (backend/main.go:255).
+#   This script calls that endpoint on all servers in parallel via curl.
 #
-# ALLINEAMENTO CON L'ESPERIMENTO:
-#   6 stati × 10s = ciclo di 60s = esattamente la durata di ogni step
-#   dell'esperimento (default DURATION=60).
-#   → ogni step dell'esperimento vede ESATTAMENTE un ciclo completo,
-#     garantendo che Prequal e RR siano esposti alle stesse condizioni.
+# ALIGNMENT WITH THE EXPERIMENT:
+#   6 states × 10s = 60s cycle = exactly the duration of each experiment
+#   step (default DURATION=60).
+#   → every experiment step sees EXACTLY one full cycle, guaranteeing
+#     that Prequal and RR are exposed to the same conditions.
 #
-# WORKFLOW CONSIGLIATO:
-#   # 1) Prima: verifica visiva che il ciclo funzioni
+# RECOMMENDED WORKFLOW:
+#   # 1) First: visually verify that the cycle works
 #   ./dynamic-antagonist.sh &
-#   ./watch-backends.sh          # in un secondo terminale (tmux/screen)
-#   # ... guarda i backend muoversi, poi fermalo
+#   ./watch-backends.sh          # in a second terminal (tmux/screen)
+#   # ... watch the backends change, then stop it
 #   kill %1
 #
-#   # 2) Poi: lancia l'esperimento (il ciclo riparte automaticamente)
+#   # 2) Then: launch the experiment (the cycle restarts automatically)
 #   ./run-experiment.sh 60 dynamic
 #
-# VARIABILI D'AMBIENTE:
-#   ANTAG_INTERVAL  secondi tra un cambio di stato (default: 10)
-#   ANTAG_LOG       percorso del file di log (default: /tmp/antagonist-<ts>.log)
+# ENVIRONMENT VARIABLES:
+#   ANTAG_INTERVAL  seconds between state changes (default: 10)
+#   ANTAG_LOG       log file path (default: /tmp/antagonist-<ts>.log)
 
 set -uo pipefail
 
@@ -43,36 +43,36 @@ LOG="${ANTAG_LOG:-/tmp/antagonist-$(date +%Y%m%d-%H%M%S).log}"
 
 # Backend IPs: server-0..9 → 10.10.1.21..30
 SERVERS=(
-    "10.10.1.21"   # server-0   (originalmente heavy)
-    "10.10.1.22"   # server-1   (originalmente heavy)
-    "10.10.1.23"   # server-2   (originalmente heavy)
-    "10.10.1.24"   # server-3   (originalmente heavy)
-    "10.10.1.25"   # server-4   (originalmente medium)
-    "10.10.1.26"   # server-5   (originalmente medium)
-    "10.10.1.27"   # server-6   (originalmente medium)
-    "10.10.1.28"   # server-7   (originalmente clean)
-    "10.10.1.29"   # server-8   (originalmente clean)
-    "10.10.1.30"   # server-9   (originalmente clean)
+    "10.10.1.21"   # server-0   (originally heavy)
+    "10.10.1.22"   # server-1   (originally heavy)
+    "10.10.1.23"   # server-2   (originally heavy)
+    "10.10.1.24"   # server-3   (originally heavy)
+    "10.10.1.25"   # server-4   (originally medium)
+    "10.10.1.26"   # server-5   (originally medium)
+    "10.10.1.27"   # server-6   (originally medium)
+    "10.10.1.28"   # server-7   (originally clean)
+    "10.10.1.29"   # server-8   (originally clean)
+    "10.10.1.30"   # server-9   (originally clean)
 )
 
 # ---------------------------------------------------------------------------
-# Mappatura cpu_load → burners attivi (backend/main.go, applyCPULoad):
+# Mapping cpu_load → active burners (backend/main.go, applyCPULoad):
 #
 #   cpu_load=0   → 0 burners  (clean)
 #   cpu_load=150 → 3 burners  (medium)
 #   cpu_load=300 → 6 burners  (heavy)
-#   cpu_load=350 → 7 burners  (max — satura 7/8 core su m510)
+#   cpu_load=350 → 7 burners  (max — saturates 7/8 cores on m510)
 #
-# 6 STATI × 10s = CICLO DI 60s — corrisponde esattamente a DURATION per step.
-# Ogni step dell'esperimento vede un ciclo completo identico → confronto equo.
+# 6 STATES × 10s = 60s CYCLE — matches the per-step DURATION exactly.
+# Every experiment step sees one identical full cycle → fair comparison.
 #
-# Valori: s0  s1  s2  s3    s4  s5  s6    s7  s8  s9
+# Values: s0  s1  s2  s3    s4  s5  s6    s7  s8  s9
 # ---------------------------------------------------------------------------
 
-# MINORANZA-CARICO: in ogni stato solo 2-3 server sono caldi (350=7 burner),
-# il resto è pulito (0). I caldi si SPOSTANO nel tempo, così RR continua a
-# colpirli mentre Prequal ha sempre 7-8 server liberi dove dirottare.
-# È lo scenario del paper: pochi antagonisti in mezzo a tante repliche sane.
+# MINORITY-LOAD: in each state only 2-3 servers are hot (350 = 7 burners),
+# the rest are clean (0). The hot servers MOVE over time, so RR keeps
+# hitting them while Prequal always has 7-8 free servers to divert to.
+# This is the paper's scenario: a few antagonists among many healthy replicas.
 STATE_NAMES=(
     "HEAD   — 3 caldi a inizio fila (s0,s1,s2), resto pulito"
     "MID    — 3 caldi al centro (s3,s4,s5), resto pulito"
@@ -82,7 +82,7 @@ STATE_NAMES=(
     "PAIR2  — 2 caldi (s6,s7), resto pulito"
 )
 
-# 10 valori per riga: s0 s1 s2 s3  s4 s5 s6  s7 s8 s9   (350=caldo, 0=pulito)
+# 10 values per row: s0 s1 s2 s3  s4 s5 s6  s7 s8 s9   (350 = hot, 0 = clean)
 STATES=(
     "350 350 350   0    0   0   0    0   0   0"   # 1 HEAD
     "  0   0   0 350  350 350   0    0   0   0"   # 2 MID
@@ -95,8 +95,8 @@ STATES=(
 NUM_STATES=${#STATES[@]}
 
 # ---------------------------------------------------------------------------
-# Funzione: applica uno stato — chiama /admin/load su tutti i server
-# in parallelo (curl con timeout 2s, errori ignorati silenziosamente)
+# Apply a state — calls /admin/load on all servers in parallel
+# (curl with a 2s timeout, errors silently ignored)
 # ---------------------------------------------------------------------------
 apply_state() {
     local idx=$1
@@ -115,13 +115,13 @@ apply_state() {
         update_pids+=($!)
     done
 
-    # Attendi tutti i curl in parallelo
+    # Wait for all parallel curl calls to finish
     for pid in "${update_pids[@]}"; do
         wait "$pid" 2>/dev/null || true
     done
 }
 
-# Ripristina BASELINE all'uscita (Ctrl+C, kill, fine esperimento)
+# Restore BASELINE on exit (Ctrl+C, kill, end of experiment)
 cleanup() {
     echo "" | tee -a "$LOG"
     echo "[$(date '+%H:%M:%S')] EXIT — ripristino BASELINE..." | tee -a "$LOG"
@@ -132,7 +132,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # ---------------------------------------------------------------------------
-# Avvio
+# Startup
 # ---------------------------------------------------------------------------
 echo "=============================================" | tee -a "$LOG"
 echo " Dynamic Antagonist — PID=$$"                 | tee -a "$LOG"
@@ -141,7 +141,7 @@ echo " Log: $LOG"                                   | tee -a "$LOG"
 echo "=============================================" | tee -a "$LOG"
 echo ""                                             | tee -a "$LOG"
 
-# Applica subito BASELINE, poi cicla
+# Apply BASELINE immediately, then cycle
 apply_state 0
 sleep "$INTERVAL"
 
