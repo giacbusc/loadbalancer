@@ -19,32 +19,28 @@ https://github.com/giacbusc/loadbalancer
 
 # 1. Introduction
 
-Introduce the paper by summarizing:
-
-- The problem the paper addresses and its importance
-
 Modern large-scale services such as YouTube are composed of thousands of distributed jobs, each replicated across hundreds or thousands of machines for reasons of scalability and redundancy. Any two jobs in such an architecture communicate via remote procedure calls (RPCs), and whenever a client job sends a query to a server job, a load balancer must decide which of the many available server replicas should handle that particular request. This decision is made millions of times per second, and even small inefficiencies in this process translate into wasted resources and degraded user experience.
-The problem the paper addresses is the following: 
+
 "In a multi-tenant environment where server replicas share machines with unrelated workloads (called antagonists), how should a load balancer route requests so as to minimize tail latency, control error rates, and keep resource utilization stable, while remaining lightweight enough to run at production scale?"
 The problem is more challenging than it might appear. Each replica (running inside its own virtual machine) is allocated a guaranteed share of the backend's CPU (called CPU allocation), but the backends themselves are shared with other processes. If a single replica happens to share its host with an antagonist that temporarily bursts above its own allocation, the CPU-isolation mechanisms of the hypervisor will kick in and throttle that replica, severely impacting any requests it is currently serving. Because such bursts are unpredictable, unevenly distributed, and invisible to the application, traditional load-balancing strategies that assume homogeneous server capacity perform poorly. The paper shows empirical data from YouTube demonstrating that, even when 1-minute-averaged CPU usage looks well within allocation, 1-second-resolution traces reveal frequent spikes well above the limit on a non-trivial subset of replicas.
-- The key ideas behind its solution and its approach
-Prequal — short for **Probing to Reduce Queuing and Latency** — is a load-balancing policy developed and deployed in production at Google, primarily on YouTube and 20+ other large-scale services. It is built on top of the Power-of-d-Choices (PodC) paradigm, in which the load balancer samples d candidate replicas for each incoming query and forwards the query to the most suitable one according to some decision rules. Prequal makes two specific design choices that, combined, distinguish it from prior PodC implementations.
-- First, Prequal uses **Requests-In-Flight (RIF)** and **recent latency** as the load signals, instead of **CPU utilization**. RIF is an instantaneous count of how many requests a replica is currently processing. Recent latency is the median latency of completed queries over a short sliding window. Both signals are inherently up-to-date, unlike CPU utilization which must be averaged over a non-trivial time window to be meaningful. Furthermore, RIF can be considered doubly useful since it also works as an indicator of future work and as a direct constraint on per-replica RAM usage.
+
+Prequal — short for **Probing to Reduce Queuing and Latency** — is a load-balancing policy developed and deployed in production at Google, primarily on YouTube. It is built on top of the Power-of-d-Choices (PodC) paradigm, in which the load balancer samples d candidate replicas for each incoming query and forwards the query to the most suitable one according to some decision rules. Prequal makes two specific design choices that, combined, distinguish it from prior PodC implementations.
+- First, Prequal uses **Requests-In-Flight (RIF)** and **recent latency** as the load signals, instead of **CPU utilization**. RIF is an instantaneous count of how many requests a replica is currently processing. Recent latency is the median latency of completed queries over a short sliding window. Both signals are inherently up-to-date, unlike CPU utilization which must be averaged over a non-trivial time window to be meaningful. Furthermore, RIF can be considered doubly useful since it also works as an indicator of future work.
 - Second, Prequal combines RIF and latency through a **Hot-Cold Lexicographic (HCL) rule**. Each probed replica is classified as *"hot"* if its RIF exceeds the QRIF-th quantile of the global RIF distribution (default 0.84), and *"cold"* otherwise. If at least one cold replica is available among the candidates, the lowest-latency cold replica is chosen; otherwise, the lowest-RIF hot replica is chosen.
-- The main contributions
-The paper points out three main contributions.
-Contribution 1:The combination of RIF and latency through strict hot/cold lexicographic prioritization is, to the authors' knowledge, new. The paper compares HCL empirically against nine other replica-selection rules (such as Random, Round-Robin, WRR, LeastLoaded, LL-Po2C, YARP-Po2C, a linear combination of RIF and latency, the C3 scoring rule, and Prequal itself) on a controlled testbed. HCL outperforms all of them at both moderate and high load levels.
-Contribution 2: Asynchronous probing with a managed probe pool. The async probing scheme — in which probes are issued out of the request path and selection draws from a pool managed with age-out, bounded reuse, and remove-worst — is a novel application of ideas from the theory of balanced allocations with memory. It allows Prequal to retain the freshness benefits of active probing while keeping per-request critical-path overhead negligible.
-Contribution 3: Large-scale production evidence.The reported outcomes — tail-latency reductions of 2×, tail-RIF reductions of 5–10×, tail-memory savings of 10–20%, and near-elimination of load-imbalance errors — make a strong case that the academic theory of Power-of-d-Choices works as well in industrial practice as it does in mathematical models.
+
+The paper points out three main contributions:
+- The first one is the combination of RIF and latency through strict hot/cold lexicographic prioritization which is, to the authors' knowledge, new. The paper compares HCL empirically against nine other replica-selection rules on a controlled testbed. HCL outperforms all of them at both moderate and high load levels.
+- The second one is the asynchronous probing with a managed probe pool. The async probing scheme, in which probes are issued out of the request path, is a novel application of ideas from the theory of balanced allocations with memory. It allows Prequal to retain the freshness benefits of active probing while keeping per-request critical-path overhead negligible.
+- The last contribution is large-scale production evidence. The reported outcomes (tail-latency reductions of 2×, tail-RIF reductions of 5–10×, tail-memory savings of 10–20%, and near-elimination of load-imbalance errors) make a strong case that the theory behind Power-of-d-Choices works as well in industrial practice as it does in mathematical models.
 
 
 # 2. Selected Result
 
-We reproduce **Figure 6** of the paper — the *load ramp experiment* — which is the central empirical result of the testbed evaluation (section 5.1). Figure 6 demonstrates how Prequal and Weighted Round Robin (WRR) behave as request load crosses the system's CPU allocation boundary, from comfortably below capacity through severe overload.
+We reproduce **Figure 6** of the paper: the *load ramp experiment*. That experiment is the central empirical result of the testbed evaluation (section 5.1). Figure 6 demonstrates how Prequal and Weighted Round Robin (WRR) behave as request load crosses the system's CPU allocation boundary, from comfortably below capacity through severe overload.
 
-> "Figure 6 shows that, as soon as the offered load exceeds the system's CPU allocation, WRR's tail latency collapses almost immediately (p99.9 hits the 5 s timeout at 1.03× allocation), while Prequal's tail latency degrades gradually and remains orders of magnitude lower across all overload levels. This experiment demonstrates that Prequal's Hot-Cold Lexicographic (HCL) selection rule can absorb transient overload that would cause catastrophic tail latency inflation under a utilization-balancing policy."
+> "Figure 6 shows that, as soon as the offered load exceeds the system's CPU allocation, WRR's tail latency collapses almost immediately (p99.9 hits the 5 s timeout at 1.03× allocation), while Prequal's tail latency degrades gradually and remains orders of magnitude lower across all overload levels. This experiment demonstrates that Prequal's Hot-Cold Lexicographic (HCL) selection rule can absorb transient overload, that would cause catastrophic tail latency inflation under a utilization-balancing policy."
 
-This result is important for two reasons. First, it isolates the core claim of the paper: that routing based on *in-flight requests* (RIF) and *latency*, rather than CPU utilization, is the right signal under overload. Second, it shows that the benefit is not marginal — WRR saturates end-to-end within one overload step, whereas Prequal gracefully degrades across nine steps spanning 1.03× to 1.74× allocation, never reaching the timeout threshold even at the highest load level.
+This result is important for two reasons. First, it isolates the core claim of the paper: that routing based on *in-flight requests* (RIF) and *latency*, rather than CPU utilization, is the right signal under overload. Second, it shows that the benefit is not marginal (WRR saturates end-to-end within one overload step) whereas Prequal gracefully degrades across nine steps spanning 1.03× to 1.74× allocation, never reaching the timeout threshold even at the highest load level.
 
 <center>
   <img
@@ -71,7 +67,7 @@ All experiments were executed on the [CloudLab](https://www.cloudlab.us) remote 
 | Memory | 64 GB DDR4 ECC |
 | Storage | 256 GB NVMe flash |
 | Network | Dual-port Mellanox ConnectX-3, 10 Gbps |
-| Inter-node link | 1 Gbps experiment LAN (configured in the profile) |
+| Inter-node link | 1 Gbps experiment LAN |
 
 The choice of this machine was driven purely by practical considerations and hardware availability.
 The 15 nodes were assigned the following roles via the profile and a per-role startup script ([`cloudlab-setup.sh`](https://github.com/giacbusc/loadbalancer/blob/main/cloudlab-setup.sh)):
@@ -84,7 +80,7 @@ The 15 nodes were assigned the following roles via the profile and a per-role st
 | Backend | 10 | .21–.30 | Processing the requests |
 | Load generator (`loadgen`) | 2 | .31–.32 | Hey-based load injection |
 
-The two load balancers and the 10 backends were placed on separate physical machines to ensure that CPU contention came exclusively from the configured antagonists, not from co-location with other components of our own system. The observability node was likewise separate so that Prometheus scraping and Grafana rendering could not interfere with the measured paths.
+The two load balancers and the 10 backends were placed on separate physical machines to ensure that CPU contention came exclusively from the configured antagonists, not from co-location with other components of our own system. The observability node was likewise separated so that Prometheus scraping and Grafana rendering could not interfere with the measured paths.
 
 
 ## 3.2 Software Environment
@@ -97,17 +93,17 @@ Docker has been selected so that the same binaries could be built and tested loc
 | Software | Version | Purpose |
 |---|---|---|
 | Ubuntu | 22.04 LTS | Base OS |
-| Docker Engine | 24.x (installed via official Docker apt repo) | Container runtime |
+| Docker Engine | 24.x  | Container runtime |
 | Go (build-time) | 1.24-alpine (inside container) | Language toolchain |
-| Go (loadgen-only) | golang-1.23 (Ubuntu apt package) | Required to compile `hey` |
-| Prometheus | latest (official image `prom/prometheus`) | Metrics scraping |
-| Grafana | latest (official image `grafana/grafana`) | Dashboards |
-| `hey` (load tester) | v0.1.5 (built from `github.com/rakyll/hey@latest`) | HTTP load generation |
+| Go (loadgen-only) | golang-1.23  | Required to compile `hey` |
+| Prometheus | latest  | Metrics scraping |
+| Grafana | latest  | Dashboards |
+| `hey` (load tester) | v0.1.5  | HTTP load generation |
 | Key Go dependency | `github.com/prometheus/client_golang v1.20.5` | Metrics exposition |
 
 ### Paper artifact
 
-The original Prequal paper (Wydrowski et al., NSDI '24) **does not publish source code or a reproduction artifact**. Prequal is implemented inside Google's proprietary Stubby RPC framework and was not open-sourced. Therefore we did **not** use the paper's artifact (it does not exist publicly). Instead, our work is a re-implementation in Go starting from the open-source skeleton at `github.com/omarshaarawi/loadbalancer`, which we forked and modified with also some enhancement. The exact commit used for the experiments reported here is on the `main` branch of our fork at [`github.com/giacbusc/loadbalancer`](https://github.com/giacbusc/loadbalancer).
+The original Prequal paper (Wydrowski et al., NSDI '24) **does not publish source code or a reproduction artifact**. Prequal is implemented inside Google's proprietary Stubby RPC framework and was not open-sourced. Therefore we did **not** use the paper's artifact. Instead, our work is a re-implementation in Go starting from the open-source skeleton at `github.com/omarshaarawi/loadbalancer`, which we forked and modified with enhancement. The exact commit used for the experiments reported here is on the `main` branch of our fork at [`github.com/giacbusc/loadbalancer`](https://github.com/giacbusc/loadbalancer).
 
 ### Local repository layout (relevant files)
 
