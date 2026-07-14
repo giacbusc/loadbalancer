@@ -31,8 +31,8 @@ Faithful:
 
 Still simplified vs. the paper:
 - No "probe pool with reuse limit / age-out / remove-worst" mechanism
-- No sinkhole protection (error-aversion heuristic from §4)
-- Probing is at fixed interval (every 1s), not per-query as in §4
+- No sinkhole protection (error-aversion heuristic from section 4)
+- Probing is at fixed interval (every 1s), not per-query as in section 4
 - 10 servers × 2 LBs is small compared to the paper's 100×100 setup
 
 ## The experiments
@@ -112,3 +112,11 @@ The backend exposes `POST /admin/load?cpu=N` to mutate `CPU_LOAD` at runtime.
 Cluster provisioning, health checks, and the exact commands for each of the
 three experiments (plus the parameter sweeps and how to pull the figures
 back locally) are in **[EXPERIMENTS-CLOUDLAB.md](EXPERIMENTS-CLOUDLAB.md)**.
+
+## Credits
+
+This project started as a fork of Omar Shaarawi's
+[loadbalancer](https://github.com/omarshaarawi/loadbalancer), which provided
+the initial Prequal / Round-Robin implementation. The CloudLab distributed
+setup, the antagonist model, and the three experiments described above were
+built on top of it.
