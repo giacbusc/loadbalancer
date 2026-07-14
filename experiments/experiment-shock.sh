@@ -2,7 +2,7 @@
 # experiment-shock.sh — TRANSIENT RESPONSE to a correlated shock (experiment A).
 #
 # MOTIVATION (further exploration, goes BEYOND the paper):
-#   All the paper's experiments (and ours so far) measure the system at
+#   All the paper's experiments measure the system at
 #   STEADY STATE: one equilibrium point per load level, tail-latency vs
 #   load. The paper NEVER looks at the TIME DOMAIN:
 #     1. how quickly each policy REACTS to a sudden shock, and
@@ -13,7 +13,7 @@
 #   we find the point where that cold majority disappears and Prequal's
 #   advantage vanishes (the "no escape" regime).
 #
-# HOW (without changing anything major):
+# HOW:
 #   - CONSTANT load (BASE_LEVEL × saturation) for the whole pass, as in
 #     experiment-ab.sh, with saturation discovery done once on RR.
 #   - Antagonist square wave: WARMUP, then ON (NHOT backends at SHOCK_LOAD) for
@@ -31,7 +31,7 @@
 #   ./experiment-shock.sh 108 4           # 108s/pass, 4 backends hit
 #   NHOT sweep ("no escape" regime):
 #   for n in 2 4 6 8; do ./experiment-shock.sh 108 $n; done
-#   Long shock (old default): HOT=8 COOL=12 ./experiment-shock.sh 180 6
+#   Long shock: HOT=8 COOL=12 ./experiment-shock.sh 180 6
 #
 # Environment variables (optional overrides):
 #   BASE_LEVEL  constant load as a fraction of saturation          (default 1.00)
@@ -96,7 +96,7 @@ echo "Entrambi gli LB raggiungibili."
 
 # ACTIVE probe interval read from the LB (GET /admin/probe-interval), so the
 # directory and meta.env are self-documenting for the freshness sweep.
-# If the LB is an old build without the endpoint, fall back to "unknown".
+# If the endpoint is missing, fall back to "unknown".
 PROBE_IV=$(curl -fsS "$LB1/admin/probe-interval" 2>/dev/null | tr -d '[:space:]')
 [ -z "$PROBE_IV" ] && PROBE_IV="unknown"
 # Active RIF source: true = server-local (probed, can go stale), false = client-local (real-time).

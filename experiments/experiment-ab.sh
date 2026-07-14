@@ -1,7 +1,7 @@
 #!/bin/bash
 # experiment-ab.sh — CLEAN A/B in two passes, with no contamination.
 #
-# IDEA (see discussion):
+# DESIGN:
 #   Instead of keeping lb-prequal and lb-rr running SIMULTANEOUSLY on the same
 #   backends (the two algorithms step on each other: Prequal routes to the idle
 #   server while RR floods it → Prequal's signal gets erased), we run TWO

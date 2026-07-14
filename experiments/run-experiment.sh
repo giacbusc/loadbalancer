@@ -1,12 +1,12 @@
 #!/bin/bash
-# run-experiment.sh - Load-ramp experiment, FIXED VERSION.
+# run-experiment.sh - Load-ramp experiment.
 #
-# Key fixes vs. the broken version:
-#   1. Real saturation discovery: an uncapped hey burst finds the TRUE
-#      max throughput, instead of trusting a "-q 200" that hey ignores.
+# Ramps the load from under- to over-capacity and compares Prequal vs RR:
+#   1. Saturation discovery: an uncapped hey burst finds the true max
+#      throughput under the current workload and antagonist configuration.
 #   2. Absolute QPS levels around and BEYOND that saturation point, so the
 #      system actually enters the overload regime where Prequal vs RR diverge.
-#   3. Antagonists must be strong (set in profile.py: cpu_load 350/150/0).
+#   3. Antagonists are set strong in profile.py (cpu_load 350/150/0).
 #
 # Usage: ./run-experiment.sh [duration_per_step] [dynamic]   (default: 60, static)
 #
@@ -30,7 +30,7 @@ RESULTS_DIR="/tmp/results-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$RESULTS_DIR"
 
 echo "============================================="
-echo "Prequal vs Round-Robin - Load Ramp (fixed)"
+echo "Prequal vs Round-Robin - Load Ramp"
 echo "============================================="
 echo "Duration per step:  ${DURATION}s"
 echo "Antagonist mode:    ${DYNAMIC:-static}"
